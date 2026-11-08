@@ -1,0 +1,14 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  body {
+    @apply bg-brand-50 text-brand-900;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+}
