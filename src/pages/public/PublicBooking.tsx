@@ -7,8 +7,10 @@ import {
   Copy,
   Check,
   Building2,
+  UserCheck,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/Button';
 import { Input, Textarea } from '@/components/ui/Input';
 import { Badge } from '@/components/ui/Badge';
@@ -50,6 +52,7 @@ interface AnnouncementView {
 
 export const PublicBooking: React.FC = () => {
   const { orgSlug } = useParams<{ orgSlug: string }>();
+  const { user, profile } = useAuth();
 
   const [org, setOrg] = useState<OrgData | null>(null);
   const [activities, setActivities] = useState<ActivityView[]>([]);
@@ -70,8 +73,56 @@ export const PublicBooking: React.FC = () => {
     phone: '',
     notes: '',
   });
+  const [isAutoFilled, setIsAutoFilled] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [bookingError, setBookingError] = useState<string | null>(null);
+
+  // Auto-completar datos si el usuario ya está logueado o ya reservó en este dispositivo
+  useEffect(() => {
+    if (profile || user) {
+      const meta = user?.user_metadata || {};
+      const fullName = (meta.full_name as string) || '';
+      const parts = fullName.trim().split(' ');
+      const fallbackFirst = parts[0] || '';
+      const fallbackLast = parts.slice(1).join(' ') || '';
+
+      const firstName = profile?.first_name || (meta.first_name as string) || fallbackFirst;
+      const lastName = profile?.last_name || (meta.last_name as string) || fallbackLast;
+      const email = profile?.email || user?.email || '';
+      const phone = profile?.phone || (meta.phone as string) || '';
+
+      if (firstName || email) {
+        setForm((prev) => ({
+          ...prev,
+          first_name: prev.first_name || firstName,
+          last_name: prev.last_name || lastName,
+          email: prev.email || email,
+          phone: prev.phone || phone,
+        }));
+        setIsAutoFilled(true);
+      }
+      return;
+    }
+
+    try {
+      const saved = localStorage.getItem('turnar_client_info');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.email) {
+          setForm((prev) => ({
+            ...prev,
+            first_name: prev.first_name || parsed.first_name || '',
+            last_name: prev.last_name || parsed.last_name || '',
+            email: prev.email || parsed.email || '',
+            phone: prev.phone || parsed.phone || '',
+          }));
+          setIsAutoFilled(true);
+        }
+      }
+    } catch {
+      // ignore localStorage error
+    }
+  }, [user, profile]);
 
   // Confirmation result
   const [confirmedBooking, setConfirmedBooking] = useState<{
@@ -171,6 +222,21 @@ export const PublicBooking: React.FC = () => {
     if (error) {
       setBookingError(error.message);
     } else if (data && Array.isArray(data) && data.length > 0) {
+      // Guardar datos para que el usuario nunca más tenga que volver a tipear su información
+      try {
+        localStorage.setItem(
+          'turnar_client_info',
+          JSON.stringify({
+            first_name: form.first_name.trim(),
+            last_name: form.last_name.trim(),
+            email: form.email.trim(),
+            phone: form.phone.trim(),
+          })
+        );
+      } catch {
+        // ignore
+      }
+
       setConfirmedBooking(data[0] as { booking_id: string; cancellation_token: string });
       await loadData();
     } else {
@@ -490,6 +556,19 @@ export const PublicBooking: React.FC = () => {
                   {bookingError && (
                     <div className="mb-3 p-2.5 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
                       {bookingError}
+                    </div>
+                  )}
+
+                  {isAutoFilled && form.email && (
+                    <div className="mb-3.5 p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-900 flex items-start gap-2.5">
+                      <UserCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                      <div className="flex-1">
+                        <span className="font-bold">Datos cargados automáticamente</span>
+                        <p className="text-[11px] text-emerald-700 mt-0.5">
+                          {form.first_name} {form.last_name} ({form.email})
+                          {form.phone ? ` · ${form.phone}` : ''}
+                        </p>
+                      </div>
                     </div>
                   )}
 
