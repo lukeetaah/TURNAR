@@ -33,6 +33,36 @@ DROP CONSTRAINT IF EXISTS activity_schedules_activity_id_fkey;
 -- -----------------------------------------------------------------------------
 -- 2. ASIGNAR PRIVILEGIOS DE SUPERADMIN A lucascorrea@outlook.com.ar
 -- -----------------------------------------------------------------------------
+-- Ajustar la función de protección para permitir modificaciones administrativas
+-- cuando se ejecutan directamente desde el SQL Editor o migraciones (auth.uid() IS NULL).
+CREATE OR REPLACE FUNCTION public.protect_profile_admin_flag()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+BEGIN
+    -- Permitir si se ejecuta como postgres/administrador de base de datos en SQL Editor
+    IF auth.uid() IS NULL THEN
+        NEW.updated_at := pg_catalog.now();
+        RETURN NEW;
+    END IF;
+
+    -- Si se ejecuta desde una sesión autenticada de usuario, exigir que sea superadmin
+    IF NEW.is_platform_admin IS DISTINCT FROM OLD.is_platform_admin THEN
+        IF NOT EXISTS (
+            SELECT 1 FROM public.profiles
+            WHERE id = auth.uid() AND is_platform_admin = TRUE
+        ) THEN
+            RAISE EXCEPTION 'No tenés permisos para modificar los privilegios de administración global de TURNAR.';
+        END IF;
+    END IF;
+
+    NEW.updated_at := pg_catalog.now();
+    RETURN NEW;
+END;
+$$;
+
 UPDATE public.profiles
 SET is_platform_admin = TRUE,
     updated_at = pg_catalog.now()
