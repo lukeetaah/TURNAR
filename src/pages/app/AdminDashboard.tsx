@@ -14,6 +14,8 @@ import {
   AlertTriangle,
   RefreshCw,
   UserCheck,
+  Trash2,
+  UserMinus,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useOrg } from '@/contexts/OrgContext';
@@ -324,6 +326,66 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
+  // Eliminar miembro de cualquier organización (soporta RPC y delete directo)
+  const handleRemoveMember = async (orgId: string, memberUserId: string, memberEmail?: string) => {
+    if (!window.confirm(`¿Confirmás quitar a ${memberEmail || 'este usuario'} de la organización?`)) {
+      return;
+    }
+
+    try {
+      if (!supabase) return;
+
+      const { error: rpcErr } = await supabase.rpc('admin_remove_member', {
+        p_org_id: orgId,
+        p_user_id: memberUserId,
+      });
+
+      if (rpcErr) {
+        const { error: delErr } = await supabase
+          .from('organization_members')
+          .delete()
+          .eq('organization_id', orgId)
+          .eq('user_id', memberUserId);
+
+        if (delErr) throw delErr;
+      }
+
+      await refetchOrgs();
+      await fetchData();
+      alert(`Miembro ${memberEmail || ''} removido exitosamente.`);
+    } catch (err: any) {
+      alert(`Error al remover miembro: ${err?.message || err}`);
+    }
+  };
+
+  // Cambiar rol de miembro
+  const handleChangeRole = async (orgId: string, memberUserId: string, newRole: string) => {
+    try {
+      if (!supabase) return;
+
+      const { error: rpcErr } = await supabase.rpc('admin_update_member_role', {
+        p_org_id: orgId,
+        p_user_id: memberUserId,
+        p_role: newRole,
+      });
+
+      if (rpcErr) {
+        const { error: upErr } = await supabase
+          .from('organization_members')
+          .update({ role: newRole })
+          .eq('organization_id', orgId)
+          .eq('user_id', memberUserId);
+
+        if (upErr) throw upErr;
+      }
+
+      await refetchOrgs();
+      await fetchData();
+    } catch (err: any) {
+      alert(`Error al actualizar rol: ${err?.message || err}`);
+    }
+  };
+
   // Toggle de visibilidad en directorio
   const handleToggleDirectory = async (org: AdminOrg) => {
     if (!supabase) return;
@@ -553,22 +615,49 @@ export const AdminDashboard: React.FC = () => {
 
               {lavaOrg && lavaOrg.members.length > 0 ? (
                 <div className="space-y-2">
-                  {lavaOrg.members.map((m) => (
-                    <div
-                      key={m.user_id}
-                      className="p-3 rounded-xl bg-white border border-brand-200 flex items-center justify-between gap-3 text-xs shadow-2xs"
-                    >
-                      <div>
-                        <p className="font-bold text-brand-900">
-                          {m.profiles ? `${m.profiles.first_name || ''} ${m.profiles.last_name || ''}`.trim() : 'Usuario'}
-                        </p>
-                        <p className="text-[11px] text-brand-500 font-mono">{m.profiles?.email || 'Sin correo'}</p>
+                  {lavaOrg.members.map((m) => {
+                    const isLucas = m.user_id === user?.id || m.profiles?.email?.toLowerCase() === 'lucascorrea@outlook.com.ar';
+
+                    return (
+                      <div
+                        key={m.user_id}
+                        className="p-3 rounded-xl bg-white border border-brand-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs shadow-2xs"
+                      >
+                        <div>
+                          <p className="font-bold text-brand-900 flex items-center gap-1.5">
+                            <span>{m.profiles ? `${m.profiles.first_name || ''} ${m.profiles.last_name || ''}`.trim() : 'Usuario'}</span>
+                            {isLucas && (
+                              <Badge variant="warning" className="text-[9px]">Vos</Badge>
+                            )}
+                          </p>
+                          <p className="text-[11px] text-brand-500 font-mono">{m.profiles?.email || 'Sin correo'}</p>
+                        </div>
+
+                        <div className="flex items-center gap-2 self-end sm:self-auto">
+                          <select
+                            value={m.role}
+                            onChange={(e) => handleChangeRole(lavaOrg.id, m.user_id, e.target.value)}
+                            className="text-xs bg-brand-50 border border-brand-200 rounded-lg px-2 py-1 font-semibold text-brand-800 focus:ring-1 focus:ring-brand-900"
+                          >
+                            <option value="owner">Dueño</option>
+                            <option value="admin">Administrador</option>
+                            <option value="instructor">Profesor</option>
+                            <option value="client">Alumno</option>
+                          </select>
+
+                          <Button
+                            variant="ghost"
+                            size="xs"
+                            onClick={() => handleRemoveMember(lavaOrg.id, m.user_id, m.profiles?.email)}
+                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                            icon={<Trash2 className="w-3.5 h-3.5" />}
+                          >
+                            {isLucas ? 'Quitarme' : 'Quitar'}
+                          </Button>
+                        </div>
                       </div>
-                      <Badge variant={m.role === 'owner' ? 'danger' : 'default'} className="text-[10px]">
-                        {formatRole(m.role)}
-                      </Badge>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800 leading-relaxed">
@@ -577,17 +666,28 @@ export const AdminDashboard: React.FC = () => {
                 </div>
               )}
 
-              {/* Botón rápido para que Lucas se asigne como dueño */}
-              <div className="mt-3">
-                <Button
-                  variant="secondary"
-                  size="xs"
-                  loading={sebaLoading}
-                  onClick={handleClaimLavaSelf}
-                  icon={<UserCheck className="w-3.5 h-3.5 text-terracotta-600" />}
-                >
-                  Asignarme a mí ({user?.email}) como Dueño de LAVA
-                </Button>
+              {/* Botones de membresía para Lucas */}
+              <div className="mt-3 flex flex-wrap gap-2">
+                {lavaOrg?.members.some((m) => m.user_id === user?.id || m.profiles?.email?.toLowerCase() === 'lucascorrea@outlook.com.ar') ? (
+                  <Button
+                    variant="danger"
+                    size="xs"
+                    onClick={() => handleRemoveMember(lavaOrg.id, user!.id, user!.email)}
+                    icon={<UserMinus className="w-3.5 h-3.5" />}
+                  >
+                    Quitarme a mí ({user?.email}) de LAVA CERÁMICA
+                  </Button>
+                ) : (
+                  <Button
+                    variant="secondary"
+                    size="xs"
+                    loading={sebaLoading}
+                    onClick={handleClaimLavaSelf}
+                    icon={<UserCheck className="w-3.5 h-3.5 text-terracotta-600" />}
+                  >
+                    Asignarme a mí ({user?.email}) como Dueño de LAVA
+                  </Button>
+                )}
               </div>
             </div>
 
@@ -781,7 +881,7 @@ export const AdminDashboard: React.FC = () => {
                               setAssignModalOpen(true);
                             }}
                           >
-                            Asignar
+                            Miembros
                           </Button>
                           <Button
                             variant="primary"
@@ -854,8 +954,55 @@ export const AdminDashboard: React.FC = () => {
       <Modal
         open={assignModalOpen}
         onClose={() => setAssignModalOpen(false)}
-        title={`Asignar miembro a ${targetOrg?.name || 'Espacio'}`}
+        title={`Gestionar miembros de ${targetOrg?.name || 'Espacio'}`}
       >
+        {targetOrg && targetOrg.members.length > 0 && (
+          <div className="mb-4 pb-4 border-b border-brand-100">
+            <h4 className="text-xs font-bold text-brand-900 mb-2 uppercase tracking-wider">
+              Miembros actuales ({targetOrg.members.length})
+            </h4>
+            <div className="space-y-1.5 max-h-48 overflow-y-auto">
+              {targetOrg.members.map((m) => (
+                <div
+                  key={m.user_id}
+                  className="p-2.5 rounded-lg bg-brand-50 border border-brand-200 flex items-center justify-between gap-2 text-xs"
+                >
+                  <div className="truncate">
+                    <p className="font-bold text-brand-900 truncate">
+                      {m.profiles ? `${m.profiles.first_name || ''} ${m.profiles.last_name || ''}`.trim() : 'Usuario'}
+                    </p>
+                    <p className="text-[10px] text-brand-400 font-mono truncate">{m.profiles?.email}</p>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <select
+                      value={m.role}
+                      onChange={(e) => handleChangeRole(targetOrg.id, m.user_id, e.target.value)}
+                      className="text-[11px] bg-white border border-brand-200 rounded px-1.5 py-0.5 font-semibold text-brand-800"
+                    >
+                      <option value="owner">Dueño</option>
+                      <option value="admin">Administrador</option>
+                      <option value="instructor">Profesor</option>
+                      <option value="client">Alumno</option>
+                    </select>
+
+                    <Button
+                      variant="ghost"
+                      size="xs"
+                      onClick={() => handleRemoveMember(targetOrg.id, m.user_id, m.profiles?.email)}
+                      className="text-red-600 hover:text-red-700 hover:bg-red-50 p-1"
+                      icon={<Trash2 className="w-3.5 h-3.5" />}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <h4 className="text-xs font-bold text-brand-900 mb-2 uppercase tracking-wider">
+          Asignar nuevo miembro o invitar
+        </h4>
         {assignMsg && (
           <div
             className={`mb-3 p-3 rounded-lg text-xs ${

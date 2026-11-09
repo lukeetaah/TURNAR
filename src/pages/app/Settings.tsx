@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Settings as SettingsIcon,
   Users,
@@ -8,7 +9,9 @@ import {
   Plus,
   Globe,
   Share2,
+  Trash2,
 } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
 import { useOrg } from '@/contexts/OrgContext';
 import { supabase } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/Button';
@@ -19,6 +22,7 @@ import { formatRole } from '@/core/roles';
 
 interface MemberItem {
   id: string;
+  user_id: string;
   role: string;
   created_at: string;
   profiles: {
@@ -38,7 +42,9 @@ interface InvitationItem {
 }
 
 export const Settings: React.FC = () => {
-  const { orgId, orgSlug, orgRole } = useOrg();
+  const navigate = useNavigate();
+  const { user, profile } = useAuth();
+  const { orgId, orgSlug, orgRole, refetchOrgs } = useOrg();
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedInviteId, setCopiedInviteId] = useState<string | null>(null);
 
@@ -98,7 +104,7 @@ export const Settings: React.FC = () => {
     setLoadingTeam(true);
     const { data: memData } = await supabase
       .from('organization_members')
-      .select('id, role, created_at, profiles(first_name, last_name, email)')
+      .select('id, user_id, role, created_at, profiles(first_name, last_name, email)')
       .eq('organization_id', orgId)
       .eq('is_active', true);
 
@@ -206,7 +212,97 @@ export const Settings: React.FC = () => {
     }
   };
 
-  const isOwnerOrAdmin = orgRole === 'owner' || orgRole === 'admin';
+  const handleRemoveMember = async (memberId: string, memberUserId: string, memberEmail?: string) => {
+    if (!orgId || !supabase) return;
+
+    const isSelf = memberUserId === user?.id;
+
+    if (isSelf) {
+      const owners = members.filter((m) => m.role === 'owner');
+      if (orgRole === 'owner' && owners.length <= 1) {
+        alert('No podés abandonar el espacio porque sos el único Dueño. Asigná otro Dueño antes de salir.');
+        return;
+      }
+      if (!window.confirm('¿Confirmás que deseás abandonar este espacio de trabajo?')) {
+        return;
+      }
+    } else {
+      if (!window.confirm(`¿Confirmás eliminar a ${memberEmail || 'este usuario'} del equipo?`)) {
+        return;
+      }
+    }
+
+    try {
+      const { error: rpcErr } = await supabase.rpc('admin_remove_member', {
+        p_org_id: orgId,
+        p_user_id: memberUserId,
+      });
+
+      if (rpcErr) {
+        const { error: delErr } = await supabase
+          .from('organization_members')
+          .delete()
+          .eq('id', memberId);
+
+        if (delErr) throw delErr;
+      }
+
+      await refetchOrgs();
+
+      if (isSelf) {
+        navigate('/app');
+      } else {
+        await fetchSettingsAndTeam();
+      }
+    } catch (err: any) {
+      alert(`Error al remover miembro: ${err?.message || err}`);
+    }
+  };
+
+  const handleChangeMemberRole = async (memberId: string, memberUserId: string, newRole: string) => {
+    if (!orgId || !supabase) return;
+
+    try {
+      const { error: rpcErr } = await supabase.rpc('admin_update_member_role', {
+        p_org_id: orgId,
+        p_user_id: memberUserId,
+        p_role: newRole,
+      });
+
+      if (rpcErr) {
+        const { error: upErr } = await supabase
+          .from('organization_members')
+          .update({ role: newRole })
+          .eq('id', memberId);
+
+        if (upErr) throw upErr;
+      }
+
+      await fetchSettingsAndTeam();
+      await refetchOrgs();
+    } catch (err: any) {
+      alert(`Error al cambiar rol: ${err?.message || err}`);
+    }
+  };
+
+  const handleCancelInvite = async (invitationId: string) => {
+    if (!supabase) return;
+    if (!window.confirm('¿Confirmás cancelar y eliminar esta invitación?')) return;
+
+    try {
+      const { error: delErr } = await supabase
+        .from('organization_invitations')
+        .delete()
+        .eq('id', invitationId);
+
+      if (delErr) throw delErr;
+      await fetchSettingsAndTeam();
+    } catch (err: any) {
+      alert(`Error al cancelar invitación: ${err?.message || err}`);
+    }
+  };
+
+  const isOwnerOrAdmin = orgRole === 'owner' || orgRole === 'admin' || profile?.is_platform_admin || user?.email === 'lucascorrea@outlook.com.ar';
 
   return (
     <div className="p-4 md:p-6 max-w-4xl mx-auto space-y-6">
@@ -406,28 +502,60 @@ export const Settings: React.FC = () => {
                   : 'Miembro';
 
                 return (
-                  <div key={m.id} className="p-3 flex items-center justify-between bg-white">
+                  <div key={m.id} className="p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-white">
                     <div>
-                      <div className="font-bold text-brand-900">
-                        {fullName || 'Usuario'}
+                      <div className="font-bold text-brand-900 flex items-center gap-1.5">
+                        <span>{fullName || 'Usuario'}</span>
+                        {m.user_id === user?.id && (
+                          <Badge variant="warning" className="text-[9px]">Vos</Badge>
+                        )}
                       </div>
                       <div className="text-[11px] text-brand-400 font-mono">
                         {m.profiles?.email}
                       </div>
                     </div>
-                    <Badge
-                      variant={
-                        m.role === 'owner'
-                          ? 'danger'
-                          : m.role === 'admin'
-                          ? 'warning'
-                          : m.role === 'instructor'
-                          ? 'info'
-                          : 'default'
-                      }
-                    >
-                      {formatRole(m.role)}
-                    </Badge>
+
+                    <div className="flex items-center gap-2 self-end sm:self-auto">
+                      {isOwnerOrAdmin ? (
+                        <select
+                          value={m.role}
+                          disabled={m.user_id === user?.id && m.role === 'owner' && members.filter(x => x.role === 'owner').length <= 1}
+                          onChange={(e) => handleChangeMemberRole(m.id, m.user_id, e.target.value)}
+                          className="text-xs bg-brand-50 border border-brand-200 rounded-lg px-2 py-1 font-semibold text-brand-800 focus:ring-1 focus:ring-brand-900"
+                        >
+                          <option value="owner">Dueño</option>
+                          <option value="admin">Administrador</option>
+                          <option value="instructor">Profesor</option>
+                          <option value="client">Alumno</option>
+                        </select>
+                      ) : (
+                        <Badge
+                          variant={
+                            m.role === 'owner'
+                              ? 'danger'
+                              : m.role === 'admin'
+                              ? 'warning'
+                              : m.role === 'instructor'
+                              ? 'info'
+                              : 'default'
+                          }
+                        >
+                          {formatRole(m.role)}
+                        </Badge>
+                      )}
+
+                      {(isOwnerOrAdmin || m.user_id === user?.id) && (
+                        <Button
+                          variant="ghost"
+                          size="xs"
+                          onClick={() => handleRemoveMember(m.id, m.user_id, m.profiles?.email)}
+                          className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                          icon={<Trash2 className="w-3.5 h-3.5" />}
+                        >
+                          {m.user_id === user?.id ? 'Abandonar' : 'Quitar'}
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 );
               })}
@@ -470,6 +598,18 @@ export const Settings: React.FC = () => {
                         >
                           {copiedInviteId === inv.id ? 'Enlace copiado' : 'Copiar enlace'}
                         </Button>
+
+                        {isOwnerOrAdmin && (
+                          <Button
+                            variant="ghost"
+                            size="xs"
+                            onClick={() => handleCancelInvite(inv.id)}
+                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                            icon={<Trash2 className="w-3.5 h-3.5" />}
+                          >
+                            Eliminar
+                          </Button>
+                        )}
                       </div>
                     </div>
                   ))}
