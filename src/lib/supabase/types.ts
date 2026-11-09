@@ -233,6 +233,53 @@ export interface Database {
           claimed_at?: string | null;
         };
       };
+      contacts: {
+        Row: {
+          id: string;
+          organization_id: string;
+          user_id: string | null;
+          first_name: string;
+          last_name: string;
+          email: string | null;
+          phone: string | null;
+          notes: string | null;
+          is_minor: boolean;
+          birth_date: string | null;
+          is_active: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          organization_id: string;
+          user_id?: string | null;
+          first_name: string;
+          last_name: string;
+          email?: string | null;
+          phone?: string | null;
+          notes?: string | null;
+          is_minor?: boolean;
+          birth_date?: string | null;
+          is_active?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          organization_id?: string;
+          user_id?: string | null;
+          first_name?: string;
+          last_name?: string;
+          email?: string | null;
+          phone?: string | null;
+          notes?: string | null;
+          is_minor?: boolean;
+          birth_date?: string | null;
+          is_active?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
       plans: {
         Row: {
           id: string;

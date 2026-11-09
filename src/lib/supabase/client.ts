@@ -1,4 +1,4 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -10,8 +10,13 @@ export const isSupabaseConfigured = Boolean(
   !supabaseUrl.includes('your-project-id')
 );
 
-// Cliente seguro que evita crasheos si aún no se han configurado las variables de entorno
-export const supabase: SupabaseClient | null =
-  supabaseUrl && supabaseAnonKey && isSupabaseConfigured
-    ? createClient(supabaseUrl, supabaseAnonKey)
-    : null;
+// Cliente de Supabase desacoplado
+export const supabase: any = isSupabaseConfigured
+  ? createClient(supabaseUrl as string, supabaseAnonKey as string, {
+      auth: {
+        autoRefreshToken: true,
+        persistSession: true,
+        detectSessionInUrl: true,
+      },
+    })
+  : null;
