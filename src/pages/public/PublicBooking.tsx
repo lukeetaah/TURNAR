@@ -8,6 +8,7 @@ import {
   Check,
   Building2,
   UserCheck,
+  Calendar,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -63,6 +64,7 @@ export const PublicBooking: React.FC = () => {
 
   // Booking selection
   const [selectedActivity, setSelectedActivity] = useState<ActivityView | null>(null);
+  const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
   const [selectedSession, setSelectedSession] = useState<SessionView | null>(null);
 
   // Booking form
@@ -200,6 +202,33 @@ export const PublicBooking: React.FC = () => {
     loadData();
   }, [loadData]);
 
+  // Helper de fecha local para agrupar por día
+  const getLocalDateKey = (iso: string) => {
+    const d = new Date(iso);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  // Sesiones de la actividad seleccionada con disponibilidad
+  const activitySessions = selectedActivity
+    ? sessions.filter((s) => s.activity_id === selectedActivity.id && s.available_spots > 0)
+    : [];
+
+  // Agrupación por día local
+  const dateGroups: Record<string, SessionView[]> = {};
+  activitySessions.forEach((sess) => {
+    const k = getLocalDateKey(sess.start_time);
+    if (!dateGroups[k]) dateGroups[k] = [];
+    dateGroups[k].push(sess);
+  });
+
+  const availableDateKeys = Object.keys(dateGroups).sort();
+
+  // Sesiones correspondientes al día seleccionado
+  const daySessions = selectedDateKey && dateGroups[selectedDateKey] ? dateGroups[selectedDateKey] : [];
+
   const handleBookingSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!supabase || !org || !selectedSession) return;
@@ -309,7 +338,7 @@ export const PublicBooking: React.FC = () => {
     <div className="min-h-screen bg-brand-50 flex flex-col">
       {/* Header Público */}
       <header className="bg-white border-b border-brand-200 py-6 px-4">
-        <div className="max-w-4xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="max-w-6xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 rounded-xl bg-brand-900 text-terracotta-400 font-bold text-xl flex items-center justify-center shrink-0">
               {org.name[0].toUpperCase()}
@@ -348,7 +377,7 @@ export const PublicBooking: React.FC = () => {
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 max-w-4xl w-full mx-auto p-4 md:py-8 space-y-8">
+      <main className="flex-1 max-w-6xl w-full mx-auto p-4 md:py-8 space-y-8">
         {/* Avisos Importantes */}
         {announcements.length > 0 && (
           <div className="space-y-2">
@@ -420,11 +449,12 @@ export const PublicBooking: React.FC = () => {
             </Button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-start">
             {/* Paso 1: Elegir Actividad */}
             <div className="space-y-3">
-              <h3 className="text-xs font-bold text-brand-800 uppercase tracking-wider">
-                1. Actividades disponibles
+              <h3 className="text-xs font-bold text-brand-800 uppercase tracking-wider flex items-center gap-1.5">
+                <span className="w-5 h-5 rounded-full bg-brand-900 text-white flex items-center justify-center text-[10px]">1</span>
+                Actividades
               </h3>
               {activities.length === 0 ? (
                 <div className="bg-white rounded-xl border border-brand-200 p-4 text-center text-xs text-brand-400">
@@ -439,6 +469,7 @@ export const PublicBooking: React.FC = () => {
                         key={act.id}
                         onClick={() => {
                           setSelectedActivity(act);
+                          setSelectedDateKey(null);
                           setSelectedSession(null);
                         }}
                         className={`w-full text-left p-3.5 rounded-xl border transition-all ${
@@ -465,94 +496,171 @@ export const PublicBooking: React.FC = () => {
               )}
             </div>
 
-            {/* Paso 2: Horarios de la actividad */}
+            {/* Paso 2: Seleccionar Día */}
             <div className="space-y-3">
-              <h3 className="text-xs font-bold text-brand-800 uppercase tracking-wider">
-                2. Seleccioná día y horario
+              <h3 className="text-xs font-bold text-brand-800 uppercase tracking-wider flex items-center gap-1.5">
+                <span className="w-5 h-5 rounded-full bg-brand-900 text-white flex items-center justify-center text-[10px]">2</span>
+                Elegí el día
               </h3>
               {!selectedActivity ? (
                 <div className="bg-white rounded-xl border border-dashed border-brand-200 p-6 text-center text-xs text-brand-400">
-                  Seleccioná una actividad a la izquierda para ver los cupos.
+                  <Calendar className="w-5 h-5 mx-auto mb-2 opacity-40 text-brand-500" />
+                  Elegí una actividad a la izquierda para ver los días disponibles.
+                </div>
+              ) : availableDateKeys.length === 0 ? (
+                <div className="bg-white rounded-xl border border-brand-200 p-4 text-center text-xs text-brand-400">
+                  No hay fechas con turnos disponibles para esta actividad.
                 </div>
               ) : (
-                (() => {
-                  const availableSessions = sessions.filter(
-                    (s) => s.activity_id === selectedActivity.id && s.available_spots > 0
-                  );
+                <div className="space-y-2">
+                  {availableDateKeys.map((dateKey) => {
+                    const daySessionsList = dateGroups[dateKey] || [];
+                    const firstSession = daySessionsList[0];
+                    const d = firstSession ? new Date(firstSession.start_time) : new Date(dateKey + 'T00:00:00');
+                    const isSelected = selectedDateKey === dateKey;
+                    const weekdayName = d.toLocaleDateString('es-AR', { weekday: 'long' });
+                    const dayMonthName = d.toLocaleDateString('es-AR', { day: 'numeric', month: 'short' });
+                    const totalSpots = daySessionsList.reduce((acc, s) => acc + s.available_spots, 0);
 
-                  if (availableSessions.length === 0) {
                     return (
-                      <div className="bg-white rounded-xl border border-brand-200 p-4 text-center text-xs text-brand-400">
-                        No hay turnos con cupo disponible para esta actividad.
-                      </div>
+                      <button
+                        key={dateKey}
+                        onClick={() => {
+                          setSelectedDateKey(dateKey);
+                          setSelectedSession(null);
+                        }}
+                        className={`w-full text-left p-3 rounded-xl border transition-all ${
+                          isSelected
+                            ? 'bg-brand-900 border-brand-900 text-white shadow-xs'
+                            : 'bg-white border-brand-200 hover:border-brand-400 text-brand-900'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className={`text-[10px] font-bold uppercase tracking-wider ${isSelected ? 'text-brand-300' : 'text-brand-400'}`}>
+                            {weekdayName}
+                          </span>
+                          <span className={`text-[10px] px-1.5 py-0.2 rounded font-semibold ${isSelected ? 'bg-brand-800 text-brand-200' : 'bg-brand-100 text-brand-700'}`}>
+                            {daySessionsList.length} {daySessionsList.length === 1 ? 'horario' : 'horarios'}
+                          </span>
+                        </div>
+                        <div className="text-sm font-bold capitalize mt-0.5">
+                          {dayMonthName}
+                        </div>
+                        <div className={`text-[11px] mt-1 ${isSelected ? 'text-brand-200' : 'text-brand-500'}`}>
+                          {totalSpots} {totalSpots === 1 ? 'lugar libre' : 'lugares libres'}
+                        </div>
+                      </button>
                     );
-                  }
-
-                  return (
-                    <div className="space-y-2">
-                      {availableSessions.map((sess) => {
-                        const isSelected = selectedSession?.id === sess.id;
-                        const start = new Date(sess.start_time);
-                        const end = new Date(sess.end_time);
-
-                        const dateStr = start.toLocaleDateString('es-AR', {
-                          weekday: 'short',
-                          day: 'numeric',
-                          month: 'short',
-                        });
-                        const timeStr = `${start.toLocaleTimeString('es-AR', {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })} - ${end.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}`;
-
-                        return (
-                          <button
-                            key={sess.id}
-                            onClick={() => setSelectedSession(sess)}
-                            className={`w-full text-left p-3 rounded-xl border transition-all ${
-                              isSelected
-                                ? 'bg-terracotta-500 border-terracotta-500 text-white shadow-xs'
-                                : 'bg-white border-brand-200 hover:border-brand-400 text-brand-900'
-                            }`}
-                          >
-                            <div className="flex items-center justify-between text-xs">
-                              <span className="font-bold capitalize">{dateStr}</span>
-                              <Badge
-                                variant={isSelected ? 'default' : 'success'}
-                                className={isSelected ? 'bg-terracotta-600 text-white' : ''}
-                              >
-                                {sess.available_spots} lugares
-                              </Badge>
-                            </div>
-                            <div
-                              className={`text-[11px] font-mono mt-0.5 flex items-center gap-1 ${
-                                isSelected ? 'text-terracotta-100' : 'text-brand-500'
-                              }`}
-                            >
-                              <Clock className="w-3 h-3" />
-                              {timeStr}
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  );
-                })()
+                  })}
+                </div>
               )}
             </div>
 
-            {/* Paso 3: Datos de contacto y confirmar */}
+            {/* Paso 3: Seleccionar Horario */}
             <div className="space-y-3">
-              <h3 className="text-xs font-bold text-brand-800 uppercase tracking-wider">
-                3. Completá tus datos
+              <h3 className="text-xs font-bold text-brand-800 uppercase tracking-wider flex items-center gap-1.5">
+                <span className="w-5 h-5 rounded-full bg-brand-900 text-white flex items-center justify-center text-[10px]">3</span>
+                Elegí el horario
+              </h3>
+              {!selectedDateKey ? (
+                <div className="bg-white rounded-xl border border-dashed border-brand-200 p-6 text-center text-xs text-brand-400">
+                  <Clock className="w-5 h-5 mx-auto mb-2 opacity-40 text-brand-500" />
+                  Elegí un día a la izquierda para ver los horarios.
+                </div>
+              ) : daySessions.length === 0 ? (
+                <div className="bg-white rounded-xl border border-brand-200 p-4 text-center text-xs text-brand-400">
+                  No hay horarios disponibles para esta fecha.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {daySessions.map((sess) => {
+                    const isSelected = selectedSession?.id === sess.id;
+                    const start = new Date(sess.start_time);
+                    const end = new Date(sess.end_time);
+
+                    const timeStr = `${start.toLocaleTimeString('es-AR', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })} - ${end.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}`;
+
+                    return (
+                      <button
+                        key={sess.id}
+                        onClick={() => setSelectedSession(sess)}
+                        className={`w-full text-left p-3 rounded-xl border transition-all ${
+                          isSelected
+                            ? 'bg-terracotta-500 border-terracotta-500 text-white shadow-xs'
+                            : 'bg-white border-brand-200 hover:border-brand-400 text-brand-900'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-mono font-bold flex items-center gap-1.5">
+                            <Clock className="w-3.5 h-3.5" />
+                            {timeStr}
+                          </span>
+                          <Badge
+                            variant={isSelected ? 'default' : 'success'}
+                            className={isSelected ? 'bg-terracotta-600 text-white' : ''}
+                          >
+                            {sess.available_spots} {sess.available_spots === 1 ? 'lugar' : 'lugares'}
+                          </Badge>
+                        </div>
+                        <div className={`text-[11px] mt-1.5 flex items-center justify-between ${isSelected ? 'text-terracotta-100' : 'text-brand-400'}`}>
+                          <span>{selectedActivity?.duration_minutes} min</span>
+                          <span className="font-semibold underline underline-offset-2">
+                            {isSelected ? 'Seleccionado ✓' : 'Elegir'}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Paso 4: Datos de contacto y confirmar */}
+            <div className="space-y-3">
+              <h3 className="text-xs font-bold text-brand-800 uppercase tracking-wider flex items-center gap-1.5">
+                <span className="w-5 h-5 rounded-full bg-brand-900 text-white flex items-center justify-center text-[10px]">4</span>
+                Confirmá tu reserva
               </h3>
 
               {!selectedSession ? (
                 <div className="bg-white rounded-xl border border-dashed border-brand-200 p-6 text-center text-xs text-brand-400">
-                  Elegí una fecha y horario para ingresar tus datos.
+                  <UserCheck className="w-5 h-5 mx-auto mb-2 opacity-40 text-brand-500" />
+                  Elegí un horario para confirmar tu lugar.
                 </div>
               ) : (
                 <div className="bg-white rounded-xl border border-brand-200 p-4 shadow-2xs">
+                  {/* Resumen de la clase seleccionada */}
+                  <div className="mb-3.5 p-2.5 rounded-xl bg-brand-50 border border-brand-200 text-xs">
+                    <span className="text-[10px] font-bold text-brand-500 uppercase tracking-wider block">
+                      Turno seleccionado
+                    </span>
+                    <span className="font-bold text-brand-900 block mt-0.5">
+                      {selectedActivity?.name}
+                    </span>
+                    <div className="text-[11px] text-brand-600 mt-1 flex items-center justify-between">
+                      <span className="capitalize">
+                        {new Date(selectedSession.start_time).toLocaleDateString('es-AR', {
+                          weekday: 'short',
+                          day: 'numeric',
+                          month: 'short',
+                        })}{' '}
+                        ·{' '}
+                        {new Date(selectedSession.start_time).toLocaleTimeString('es-AR', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </span>
+                      <span className="font-bold text-brand-900">
+                        {selectedActivity && selectedActivity.price_cents > 0
+                          ? `$${(selectedActivity.price_cents / 100).toLocaleString('es-AR')}`
+                          : 'Gratis'}
+                      </span>
+                    </div>
+                  </div>
+
                   {bookingError && (
                     <div className="mb-3 p-2.5 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
                       {bookingError}
