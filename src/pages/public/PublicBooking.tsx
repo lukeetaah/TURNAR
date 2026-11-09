@@ -38,7 +38,7 @@ interface SessionView {
   end_time: string;
   capacity: number;
   booked_count: number;
-  available_spots: number;
+  available_spots: number; // calculado en cliente: capacity - booked_count
 }
 
 interface AnnouncementView {
@@ -109,7 +109,8 @@ export const PublicBooking: React.FC = () => {
     setOrg(orgData as OrgData);
 
     // 2. Load public announcements, activities, and sessions
-    const nowIso = new Date().toISOString();
+    // Mostrar sesiones desde 2 horas atrás para cubrir sesiones que ya empezaron hoy
+    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
 
     const [annRes, actRes, sessRes] = await Promise.all([
       supabase
@@ -125,15 +126,22 @@ export const PublicBooking: React.FC = () => {
         .order('name'),
       supabase
         .from('public_activity_sessions')
-        .select('id, activity_id, start_time, end_time, capacity, booked_count, available_spots')
+        .select('id, activity_id, start_time, end_time, capacity, booked_count')
         .eq('organization_id', orgData.id)
-        .gte('start_time', nowIso)
+        .gte('start_time', twoHoursAgo)
         .order('start_time'),
     ]);
 
     setAnnouncements((annRes.data as AnnouncementView[]) || []);
     setActivities((actRes.data as ActivityView[]) || []);
-    setSessions((sessRes.data as SessionView[]) || []);
+    // Calcular available_spots en cliente porque la vista no lo expone como columna
+    const rawSessions = (sessRes.data ?? []) as Omit<SessionView, 'available_spots'>[];
+    setSessions(
+      rawSessions.map((s) => ({
+        ...s,
+        available_spots: Math.max(0, s.capacity - s.booked_count),
+      }))
+    );
     setLoading(false);
   }, [orgSlug]);
 
