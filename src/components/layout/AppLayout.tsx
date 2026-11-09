@@ -18,9 +18,11 @@ import {
   KeyRound,
   Compass,
   User as UserIcon,
+  ShieldAlert,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useOrg } from '@/contexts/OrgContext';
+import { formatRole } from '@/core/roles';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { Input } from '@/components/ui/Input';
@@ -34,9 +36,9 @@ interface NavItem {
 }
 
 const allNavItems: NavItem[] = [
-  { to: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { to: 'dashboard', label: 'Inicio', icon: LayoutDashboard },
   { to: 'activities', label: 'Actividades', icon: Dumbbell, allowedRoles: ['owner', 'admin', 'instructor'] },
-  { to: 'sessions', label: 'Sesiones', icon: Calendar, allowedRoles: ['owner', 'admin', 'instructor'] },
+  { to: 'sessions', label: 'Sesiones y Horarios', icon: Calendar, allowedRoles: ['owner', 'admin', 'instructor'] },
   { to: 'agenda', label: 'Agenda', icon: Calendar },
   { to: 'contacts', label: 'Alumnos', icon: Users, allowedRoles: ['owner', 'admin', 'instructor'] },
   { to: 'payments', label: 'Pagos', icon: CreditCard, allowedRoles: ['owner', 'admin'] },
@@ -137,8 +139,8 @@ export const AppLayout: React.FC = () => {
               {orgName || 'Sin espacio'}
             </span>
             {orgRole && (
-              <span className="text-[10px] text-brand-400 capitalize block">
-                Rol: {orgRole}
+              <span className="text-[10px] text-brand-400 block">
+                Rol: {formatRole(orgRole)}
               </span>
             )}
           </div>
@@ -237,6 +239,16 @@ export const AppLayout: React.FC = () => {
             <span>{label}</span>
           </NavLink>
         ))}
+
+        {(profile?.is_platform_admin || user?.email === 'lucascorrea@outlook.com.ar') && (
+          <NavLink
+            to="/app/admin"
+            className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold transition-colors bg-amber-500/15 text-amber-300 hover:bg-amber-500/25 mt-3 border border-amber-500/30"
+          >
+            <ShieldAlert className="w-4 h-4 shrink-0 text-amber-400" />
+            <span>Panel Superadmin</span>
+          </NavLink>
+        )}
       </nav>
 
       {/* 4. Menú de Usuario (Separado al pie) */}
@@ -321,6 +333,17 @@ export const AppLayout: React.FC = () => {
                 <span>Directorio de espacios</span>
               </Link>
 
+              {(profile?.is_platform_admin || user?.email === 'lucascorrea@outlook.com.ar') && (
+                <Link
+                  to="/app/admin"
+                  onClick={() => setUserDropdown(false)}
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 transition-colors text-left font-semibold"
+                >
+                  <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Panel Superadmin</span>
+                </Link>
+              )}
+
               <div className="pt-1 border-t border-brand-800">
                 <button
                   onClick={handleSignOut}
@@ -403,7 +426,7 @@ export const AppLayout: React.FC = () => {
               <p className="text-brand-500 font-mono text-[11px]">{user?.email}</p>
               <div className="mt-1">
                 <Badge variant={orgRole === 'owner' ? 'danger' : 'default'} className="text-[10px]">
-                  Rol en este espacio: {orgRole || 'Sin rol'}
+                  Rol en este espacio: {formatRole(orgRole)}
                 </Badge>
               </div>
             </div>

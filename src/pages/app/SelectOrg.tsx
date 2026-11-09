@@ -8,6 +8,7 @@ import {
   Compass,
   CheckCircle2,
   Shield,
+  ShieldAlert,
   UserCheck,
   GraduationCap,
 } from 'lucide-react';
@@ -19,10 +20,10 @@ import { Modal } from '@/components/ui/Modal';
 import { Badge } from '@/components/ui/Badge';
 
 const roleLabels: Record<string, { label: string; variant: 'danger' | 'warning' | 'info' | 'default'; icon: any }> = {
-  owner: { label: 'Propietario', variant: 'danger', icon: Shield },
+  owner: { label: 'Dueño', variant: 'danger', icon: Shield },
   admin: { label: 'Administrador', variant: 'warning', icon: Shield },
-  instructor: { label: 'Profesor / Staff', variant: 'info', icon: GraduationCap },
-  client: { label: 'Alumno / Cliente', variant: 'default', icon: UserCheck },
+  instructor: { label: 'Profesor', variant: 'info', icon: GraduationCap },
+  client: { label: 'Alumno', variant: 'default', icon: UserCheck },
 };
 
 export const SelectOrg: React.FC = () => {
@@ -30,7 +31,7 @@ export const SelectOrg: React.FC = () => {
   const [searchParams] = useSearchParams();
   const forceSelect = searchParams.get('select') === 'true';
 
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
   const { orgs, loading, claimInvite } = useOrganizations();
 
   // Modal para aceptar invitación
@@ -104,6 +105,22 @@ export const SelectOrg: React.FC = () => {
               : 'Elegí cómo querés continuar en TURNAR'}
           </p>
         </div>
+
+        {(profile?.is_platform_admin || user?.email === 'lucascorrea@outlook.com.ar') && (
+          <div className="mb-4 p-3.5 rounded-xl bg-amber-50 border border-amber-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-2 text-amber-900 font-semibold">
+              <ShieldAlert className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>Cuenta de Administrador Global (Superadmin)</span>
+            </div>
+            <Link
+              to="/app/admin"
+              className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs inline-flex items-center gap-1 transition-colors shrink-0"
+            >
+              <span>Abrir Panel Superadmin</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+        )}
 
         {/* Escenario D: Usuario sin organizaciones */}
         {orgs.length === 0 ? (

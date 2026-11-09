@@ -68,7 +68,7 @@ export const Dashboard: React.FC = () => {
       const [contacts, activities, sessions, payments, bookings, upcoming] =
         await Promise.all([
           supabase.from('contacts').select('id, is_active').eq('organization_id', orgId),
-          supabase.from('activities').select('id').eq('organization_id', orgId).eq('is_active', true),
+          supabase.from('activities').select('id, name').eq('organization_id', orgId).eq('is_active', true),
           supabase
             .from('activity_sessions')
             .select('id')
@@ -88,7 +88,7 @@ export const Dashboard: React.FC = () => {
             .lte('created_at', lastDay.toISOString()),
           supabase
             .from('activity_sessions')
-            .select('id, start_time, end_time, booked_count, capacity, activities(name)')
+            .select('id, start_time, end_time, booked_count, capacity, activity_id')
             .eq('organization_id', orgId)
             .gte('start_time', today.toISOString())
             .lt('start_time', tomorrow.toISOString())
@@ -97,15 +97,28 @@ export const Dashboard: React.FC = () => {
         ]);
 
       const allContacts = contacts.data ?? [];
+      const actList = activities.data ?? [];
+      const actMap = new Map(actList.map((a: any) => [a.id, a]));
+
       setStats({
         totalContacts: allContacts.length,
         activeContacts: allContacts.filter((c: any) => c.is_active).length,
-        totalActivities: activities.data?.length ?? 0,
+        totalActivities: actList.length,
         upcomingSessionsToday: sessions.data?.length ?? 0,
         pendingPayments: payments.data?.length ?? 0,
         monthlyBookings: bookings.data?.length ?? 0,
       });
-      setUpcomingSessions(upcoming.data as typeof upcomingSessions ?? []);
+
+      const formattedUpcoming = (upcoming.data ?? []).map((s: any) => ({
+        id: s.id,
+        start_time: s.start_time,
+        end_time: s.end_time,
+        booked_count: s.booked_count,
+        capacity: s.capacity,
+        activities: actMap.get(s.activity_id) || { name: 'Actividad' },
+      }));
+
+      setUpcomingSessions(formattedUpcoming as typeof upcomingSessions);
       setLoading(false);
     };
     load();

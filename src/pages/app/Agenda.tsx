@@ -56,13 +56,36 @@ export const Agenda: React.FC = () => {
 
     const { data, error } = await supabase
       .from('activity_sessions')
-      .select('id, start_time, end_time, capacity, booked_count, status, activities(name, duration_minutes)')
+      .select('id, start_time, end_time, capacity, booked_count, status, activities:activities!fk_sessions_activity_org(name, duration_minutes)')
       .eq('organization_id', orgId)
       .gte('start_time', startOfDay.toISOString())
       .lte('start_time', endOfDay.toISOString())
       .order('start_time');
 
-    if (!error && data) {
+    if (error) {
+      // Fallback resiliente
+      const sessRes = await supabase
+        .from('activity_sessions')
+        .select('id, start_time, end_time, capacity, booked_count, status, activity_id')
+        .eq('organization_id', orgId)
+        .gte('start_time', startOfDay.toISOString())
+        .lte('start_time', endOfDay.toISOString())
+        .order('start_time');
+
+      if (!sessRes.error && sessRes.data) {
+        const actRes = await supabase
+          .from('activities')
+          .select('id, name, duration_minutes')
+          .eq('organization_id', orgId);
+
+        const actMap = new Map((actRes.data || []).map((a: any) => [a.id, a]));
+        const merged = sessRes.data.map((s: any) => ({
+          ...s,
+          activities: actMap.get(s.activity_id) || { name: 'Actividad', duration_minutes: 60 },
+        }));
+        setSessions(merged as unknown as SessionWithActivity[]);
+      }
+    } else if (data) {
       setSessions(data as unknown as SessionWithActivity[]);
     }
     setLoading(false);

@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/Button';
 import { Input, Select } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
 import { Badge } from '@/components/ui/Badge';
+import { formatRole } from '@/core/roles';
 
 interface MemberItem {
   id: string;
@@ -425,13 +426,7 @@ export const Settings: React.FC = () => {
                           : 'default'
                       }
                     >
-                      {m.role === 'owner'
-                        ? 'Propietario'
-                        : m.role === 'admin'
-                        ? 'Administrador'
-                        : m.role === 'instructor'
-                        ? 'Profesor / Staff'
-                        : 'Cliente'}
+                      {formatRole(m.role)}
                     </Badge>
                   </div>
                 );
@@ -455,7 +450,7 @@ export const Settings: React.FC = () => {
                           {inv.invited_email || 'Enlace de invitación abierto'}
                         </div>
                         <div className="text-[10px] text-amber-700">
-                          Rol asignado: <strong className="capitalize">{inv.role}</strong> · Vence:{' '}
+                          Rol asignado: <strong>{formatRole(inv.role)}</strong> · Vence:{' '}
                           {new Date(inv.expires_at).toLocaleDateString('es-AR')}
                         </div>
                       </div>
@@ -506,8 +501,9 @@ export const Settings: React.FC = () => {
           <Select
             label="Rol a asignar en este espacio"
             options={[
-              { value: 'instructor', label: 'Profesor / Staff (gestiona sesiones, alumnos y asistencia)' },
+              { value: 'owner', label: 'Dueño (control total y titularidad del espacio)' },
               { value: 'admin', label: 'Administrador (gestión total de actividades, pagos y equipo)' },
+              { value: 'instructor', label: 'Profesor (gestiona sesiones, alumnos y asistencia)' },
             ]}
             value={inviteRole}
             onChange={(e) => setInviteRole(e.target.value)}

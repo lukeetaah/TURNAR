@@ -29,6 +29,7 @@ import { Contacts } from '@/pages/app/Contacts';
 import { Payments } from '@/pages/app/Payments';
 import { Communications } from '@/pages/app/Communications';
 import { Settings } from '@/pages/app/Settings';
+import { AdminDashboard } from '@/pages/app/AdminDashboard';
 
 export const App: React.FC = () => {
   return (
@@ -68,6 +69,17 @@ export const App: React.FC = () => {
                 </AuthGuard>
               }
             />
+
+            {/* Platform Superadmin Dashboard */}
+            <Route
+              path="app/admin"
+              element={
+                <AuthGuard>
+                  <AdminDashboard />
+                </AuthGuard>
+              }
+            />
+            <Route path="admin" element={<Navigate to="/app/admin" replace />} />
 
             {/* Organization scoped dashboard & modules */}
             <Route

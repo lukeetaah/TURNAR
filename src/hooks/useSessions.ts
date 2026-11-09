@@ -13,6 +13,10 @@ export interface Session {
   status: string;
   created_at: string;
   updated_at: string;
+  activities?: {
+    name: string;
+    duration_minutes: number;
+  };
 }
 
 export const useSessions = (orgId: string | null, activityId?: string | null) => {
@@ -23,15 +27,48 @@ export const useSessions = (orgId: string | null, activityId?: string | null) =>
   const fetch = useCallback(async () => {
     if (!supabase || !orgId) { setLoading(false); return; }
     setLoading(true);
+
+    // 1. Intentar consulta con relación explícita por restricción de integridad
     let q = supabase
       .from('activity_sessions')
-      .select('*, activities(name, duration_minutes)')
+      .select('*, activities:activities!fk_sessions_activity_org(name, duration_minutes)')
       .eq('organization_id', orgId)
       .order('start_time');
     if (activityId) q = q.eq('activity_id', activityId);
+
     const { data, error: err } = await q;
-    if (err) setError(err.message);
-    else setSessions((data as Session[]) ?? []);
+
+    if (err) {
+      // 2. Fallback resiliente: consultar sesiones y actividades por separado y combinar en cliente
+      let fallbackQ = supabase
+        .from('activity_sessions')
+        .select('*')
+        .eq('organization_id', orgId)
+        .order('start_time');
+      if (activityId) fallbackQ = fallbackQ.eq('activity_id', activityId);
+
+      const sessRes = await fallbackQ;
+      if (sessRes.error) {
+        setError(sessRes.error.message);
+        setSessions([]);
+      } else {
+        const actRes = await supabase
+          .from('activities')
+          .select('id, name, duration_minutes')
+          .eq('organization_id', orgId);
+
+        const actMap = new Map((actRes.data || []).map((a: any) => [a.id, a]));
+        const merged = (sessRes.data || []).map((s: any) => ({
+          ...s,
+          activities: actMap.get(s.activity_id) || { name: 'Actividad', duration_minutes: 60 },
+        }));
+        setSessions(merged as Session[]);
+        setError(null);
+      }
+    } else {
+      setSessions((data as Session[]) ?? []);
+      setError(null);
+    }
     setLoading(false);
   }, [orgId, activityId]);
 
