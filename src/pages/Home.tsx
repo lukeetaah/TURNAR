@@ -12,6 +12,11 @@ import {
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/Button';
+import {
+  DIRECTORY_CATEGORIES,
+  formatCategoryLabel,
+  isCategoryMatched,
+} from '@/core/categories';
 
 interface DirectorySpace {
   id: string;
@@ -28,16 +33,6 @@ interface DirectorySpace {
   }>;
 }
 
-const CATEGORIES = [
-  { value: 'all', label: 'Todas las disciplinas' },
-  { value: 'ceramics', label: 'Cerámica' },
-  { value: 'yoga', label: 'Yoga & Pilates' },
-  { value: 'dance', label: 'Danza' },
-  { value: 'painting', label: 'Arte & Pintura' },
-  { value: 'crafts', label: 'Oficios & Talleres' },
-  { value: 'music', label: 'Música' },
-];
-
 export const Home: React.FC = () => {
   const [spaces, setSpaces] = useState<DirectorySpace[]>([]);
   const [loading, setLoading] = useState(true);
@@ -52,23 +47,45 @@ export const Home: React.FC = () => {
       }
       setLoading(true);
 
-      // Intentar consultar la vista segura del directorio público
-      let { data, error } = await supabase
+      let spacesList: DirectorySpace[] = [];
+
+      // 1. Intentar consultar la vista segura del directorio público
+      const { data: viewData, error: viewErr } = await supabase
         .from('public_directory_organizations')
         .select('*')
         .order('name');
 
-      // Fallback si la vista aún no fue creada en la instancia remota
-      if (error) {
-        const fallback = await supabase
-          .from('organizations')
-          .select('id, name, slug, description, activity_category, logo_url, address')
-          .eq('is_active', true)
-          .order('name');
-        data = fallback.data;
+      if (!viewErr && viewData && viewData.length > 0) {
+        spacesList = viewData as DirectorySpace[];
       }
 
-      setSpaces((data as DirectorySpace[]) || []);
+      // 2. Consultar organizaciones activas para asegurar que espacios nuevos (ej. LABURANTE)
+      //    que aún no tengan la migración de listado no queden afuera del directorio
+      const { data: orgData } = await supabase
+        .from('organizations')
+        .select('id, name, slug, description, activity_category, logo_url, address, is_directory_listed')
+        .eq('is_active', true)
+        .order('name');
+
+      if (orgData) {
+        const existingIds = new Set(spacesList.map((s) => s.id));
+        const missingSpaces = orgData
+          .filter((o: any) => !existingIds.has(o.id) && o.is_directory_listed !== false)
+          .map((o: any) => ({
+            id: o.id,
+            name: o.name,
+            slug: o.slug,
+            description: o.description,
+            activity_category: o.activity_category,
+            logo_url: o.logo_url,
+            address: o.address,
+            activities: [],
+          }));
+
+        spacesList = [...spacesList, ...missingSpaces];
+      }
+
+      setSpaces(spacesList);
       setLoading(false);
     };
 
@@ -86,18 +103,15 @@ export const Home: React.FC = () => {
       (space.address || '').toLowerCase().includes(term) ||
       (space.activities || []).some((a) => a.name.toLowerCase().includes(term));
 
-    const matchesCategory =
-      selectedCategory === 'all' ||
-      space.activity_category === selectedCategory ||
-      (selectedCategory === 'yoga' && (space.activity_category === 'yoga' || space.activity_category === 'pilates'));
+    const matchesCat = isCategoryMatched(space.activity_category, selectedCategory);
 
-    return matchesSearch && matchesCategory;
+    return matchesSearch && matchesCat;
   });
 
   return (
     <div className="space-y-12 py-8 md:py-14">
       {/* Hero & Directorio Header */}
-      <section className="max-w-4xl mx-auto px-4 sm:px-6 text-center">
+      <section className="max-w-5xl mx-auto px-4 sm:px-6 text-center">
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-brand-100/80 border border-brand-200 text-brand-700 text-xs font-medium mb-4">
           <Sparkles className="w-3.5 h-3.5 text-terracotta-500" />
           <span>Directorio público de espacios</span>
@@ -111,37 +125,37 @@ export const Home: React.FC = () => {
           Explorá las actividades de los espacios que eligen TURNAR. Consultá cronogramas, precios y anotate a clases sin necesidad de crear una cuenta previa.
         </p>
 
-        {/* Buscador interactivo */}
-        <div className="max-w-xl mx-auto">
-          <div className="relative">
-            <Search className="w-4 h-4 text-brand-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+        {/* Buscador interactivo de ancho completo y generoso */}
+        <div className="max-w-3xl sm:max-w-4xl mx-auto mt-6">
+          <div className="relative shadow-md rounded-2xl bg-white border-2 border-brand-200/90 focus-within:border-brand-900 focus-within:ring-4 focus-within:ring-brand-900/10 transition-all">
+            <Search className="w-5 h-5 text-brand-400 absolute left-4.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar por taller, espacio, disciplina o zona..."
-              className="w-full pl-10 pr-4 py-3 text-xs sm:text-sm bg-white border border-brand-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-900/20 shadow-xs placeholder:text-brand-400 text-brand-900"
+              placeholder="Buscar por taller, cerámica, yoga, disciplina o dirección..."
+              className="w-full pl-12 pr-24 py-4 text-sm sm:text-base bg-transparent rounded-2xl focus:outline-none placeholder:text-brand-400 text-brand-900 font-medium"
             />
             {search && (
               <button
                 onClick={() => setSearch('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-brand-400 hover:text-brand-700 px-1"
+                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-semibold text-brand-400 hover:text-brand-800 bg-brand-100/70 hover:bg-brand-200 px-2.5 py-1 rounded-lg transition-colors"
               >
                 Limpiar
               </button>
             )}
           </div>
 
-          {/* Filtros de Categoría */}
-          <div className="flex items-center gap-1.5 mt-3 overflow-x-auto pb-1 justify-start sm:justify-center">
-            {CATEGORIES.map((cat) => (
+          {/* Filtros de Categoría con scroll suave y botones legibles */}
+          <div className="flex items-center gap-2 mt-4 overflow-x-auto pb-2 justify-start sm:justify-center">
+            {DIRECTORY_CATEGORIES.map((cat) => (
               <button
                 key={cat.value}
                 onClick={() => setSelectedCategory(cat.value)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all shadow-2xs ${
                   selectedCategory === cat.value
-                    ? 'bg-brand-900 text-white'
-                    : 'bg-white text-brand-600 border border-brand-200 hover:bg-brand-50'
+                    ? 'bg-brand-900 text-white shadow-xs scale-[1.02]'
+                    : 'bg-white text-brand-700 border border-brand-200/90 hover:bg-brand-50 hover:border-brand-300'
                 }`}
               >
                 {cat.label}
@@ -227,8 +241,8 @@ export const Home: React.FC = () => {
                         {space.name}
                       </h3>
                       {space.activity_category && (
-                        <span className="text-[11px] font-semibold text-terracotta-600 capitalize block">
-                          {space.activity_category}
+                        <span className="text-[11px] font-semibold text-terracotta-600 block">
+                          {formatCategoryLabel(space.activity_category)}
                         </span>
                       )}
                       {space.address && (

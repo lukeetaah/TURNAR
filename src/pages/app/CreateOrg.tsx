@@ -93,6 +93,12 @@ export const CreateOrg: React.FC = () => {
       return;
     }
 
+    // Asegurar que el nuevo espacio figure en el directorio público por defecto
+    await supabase
+      .from('organizations')
+      .update({ is_directory_listed: true })
+      .eq('slug', cleanSlug);
+
     // Actualizar inmediatamente la lista de organizaciones en memoria
     await refetchOrgs();
     setLoading(false);
