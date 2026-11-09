@@ -9,12 +9,14 @@ import { OrgBridge } from '@/components/guards/OrgBridge';
 import { Layout } from '@/components/layout/Layout';
 import { AppLayout } from '@/components/layout/AppLayout';
 
-// Marketing pages
+// Public pages
 import { Home } from '@/pages/Home';
 import { About } from '@/pages/About';
 import { Plans } from '@/pages/Plans';
 import { Login } from '@/pages/Login';
 import { NotFound } from '@/pages/NotFound';
+import { PublicBooking } from '@/pages/public/PublicBooking';
+import { AcceptInvite } from '@/pages/public/AcceptInvite';
 
 // App pages
 import { SelectOrg } from '@/pages/app/SelectOrg';
@@ -28,9 +30,6 @@ import { Payments } from '@/pages/app/Payments';
 import { Communications } from '@/pages/app/Communications';
 import { Settings } from '@/pages/app/Settings';
 
-// Public Portal
-import { PublicBooking } from '@/pages/public/PublicBooking';
-
 export const App: React.FC = () => {
   return (
     <BrowserRouter>
@@ -40,7 +39,10 @@ export const App: React.FC = () => {
             {/* Public Portal for bookings & cancellations */}
             <Route path="o/:orgSlug" element={<PublicBooking />} />
 
-            {/* Marketing / Informative routes */}
+            {/* Public invitation claim route */}
+            <Route path="invite/:token" element={<AcceptInvite />} />
+
+            {/* Marketing / Public directory routes */}
             <Route path="/" element={<Layout />}>
               <Route index element={<Home />} />
               <Route path="about" element={<About />} />

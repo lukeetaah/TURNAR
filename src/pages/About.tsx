@@ -54,7 +54,7 @@ export const About: React.FC = () => {
               LAVA CERÁMICA es el primer espacio de trabajo real y el piloto de implementación personalizada. Demuestra cómo una organización real configura sus clases para adultos y niños, turnos de mañana y tarde, y cupos sin duplicar código ni crear una aplicación aislada.
             </p>
             <span className="text-[11px] font-medium text-terracotta-700 bg-terracotta-100/80 px-2 py-0.5 rounded">
-              Slug oficial reservado: lava-ceramica
+              Dirección oficial del espacio: lava-ceramica
             </span>
           </div>
         </div>
