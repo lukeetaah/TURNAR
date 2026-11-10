@@ -9,6 +9,10 @@ import {
   Building2,
   UserCheck,
   Calendar,
+  ShieldCheck,
+  FileText,
+  Repeat,
+  Info,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -51,6 +55,47 @@ interface AnnouncementView {
   published_at: string;
 }
 
+interface RuleItem {
+  id: string;
+  organization_id: string | null;
+  title: string;
+  content: string;
+  category: string;
+  requires_acceptance: boolean;
+  version: number;
+}
+
+// Lineamientos estándar globales de TURNAR (fallback seguro)
+const DEFAULT_GLOBAL_RULES: RuleItem[] = [
+  {
+    id: 'global-1',
+    organization_id: null,
+    title: 'Puntualidad y asistencia',
+    content: 'Te pedimos llegar con 5 minutos de anticipación al horario de tu clase para comenzar a tiempo y aprovechar la sesión.',
+    category: 'punctuality',
+    requires_acceptance: true,
+    version: 1,
+  },
+  {
+    id: 'global-2',
+    organization_id: null,
+    title: 'Cancelación anticipada y cuidado del cupo',
+    content: 'Si no podés asistir, cancelá con anticipación para liberar tu lugar a otra persona interesada.',
+    category: 'cancellation',
+    requires_acceptance: true,
+    version: 1,
+  },
+  {
+    id: 'global-3',
+    organization_id: null,
+    title: 'Cuidado de instalaciones y convivencia',
+    content: 'Tratá con cuidado las herramientas, materiales y espacios compartidos, manteniendo un ambiente respetuoso y seguro.',
+    category: 'community',
+    requires_acceptance: true,
+    version: 1,
+  },
+];
+
 export const PublicBooking: React.FC = () => {
   const { orgSlug } = useParams<{ orgSlug: string }>();
   const { user, profile } = useAuth();
@@ -76,54 +121,109 @@ export const PublicBooking: React.FC = () => {
     notes: '',
   });
   const [isAutoFilled, setIsAutoFilled] = useState(false);
+  const [emailOnlyFilled, setEmailOnlyFilled] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [bookingError, setBookingError] = useState<string | null>(null);
 
-  // Auto-completar datos si el usuario ya está logueado o ya reservó en este dispositivo
+  // Recurrencia contextual
+  const [recurrenceChoice, setRecurrenceChoice] = useState<'weekly' | 'single'>('weekly');
+  const [habitualSchedule, setHabitualSchedule] = useState<{ dayName: string; time: string; actName: string } | null>(null);
+
+  // Reglas de participación
+  const [rules, setRules] = useState<RuleItem[]>(DEFAULT_GLOBAL_RULES);
+  const [rulesAccepted, setRulesAccepted] = useState(false);
+  const [rulesModalOpen, setRulesModalOpen] = useState(false);
+
+  // Resolución honesta y en cascada de datos del usuario
   useEffect(() => {
-    if (profile || user) {
-      const meta = user?.user_metadata || {};
-      const fullName = (meta.full_name as string) || '';
-      const parts = fullName.trim().split(' ');
-      const fallbackFirst = parts[0] || '';
-      const fallbackLast = parts.slice(1).join(' ') || '';
+    const resolveUser = async () => {
+      let resolvedFirst = profile?.first_name || (user?.user_metadata?.first_name as string) || '';
+      let resolvedLast = profile?.last_name || (user?.user_metadata?.last_name as string) || '';
+      let resolvedEmail = profile?.email || user?.email || '';
+      let resolvedPhone = profile?.phone || (user?.user_metadata?.phone as string) || '';
 
-      const firstName = profile?.first_name || (meta.first_name as string) || fallbackFirst;
-      const lastName = profile?.last_name || (meta.last_name as string) || fallbackLast;
-      const email = profile?.email || user?.email || '';
-      const phone = profile?.phone || (meta.phone as string) || '';
-
-      if (firstName || email) {
-        setForm((prev) => ({
-          ...prev,
-          first_name: prev.first_name || firstName,
-          last_name: prev.last_name || lastName,
-          email: prev.email || email,
-          phone: prev.phone || phone,
-        }));
-        setIsAutoFilled(true);
+      // Si tenemos full_name en metadata pero no first/last
+      if (!resolvedFirst && user?.user_metadata?.full_name) {
+        const parts = (user.user_metadata.full_name as string).trim().split(' ');
+        resolvedFirst = parts[0] || '';
+        resolvedLast = parts.slice(1).join(' ') || '';
       }
-      return;
-    }
 
-    try {
-      const saved = localStorage.getItem('turnar_client_info');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed.email) {
-          setForm((prev) => ({
-            ...prev,
-            first_name: prev.first_name || parsed.first_name || '',
-            last_name: prev.last_name || parsed.last_name || '',
-            email: prev.email || parsed.email || '',
-            phone: prev.phone || parsed.phone || '',
-          }));
-          setIsAutoFilled(true);
+      // Si falta nombre o teléfono pero tenemos email y Supabase, buscar en padrón de contactos
+      if ((!resolvedFirst || !resolvedLast || !resolvedPhone) && resolvedEmail && supabase) {
+        try {
+          const { data: contact } = await supabase
+            .from('contacts')
+            .select('first_name, last_name, phone')
+            .eq('email', resolvedEmail.trim().toLowerCase())
+            .limit(1)
+            .maybeSingle();
+          if (contact) {
+            if (!resolvedFirst && contact.first_name) resolvedFirst = contact.first_name;
+            if (!resolvedLast && contact.last_name) resolvedLast = contact.last_name;
+            if (!resolvedPhone && contact.phone) resolvedPhone = contact.phone;
+          }
+        } catch {
+          // ignore
         }
       }
-    } catch {
-      // ignore localStorage error
-    }
+
+      // Si aún falta información, consultar almacenamiento local
+      if (!resolvedFirst || !resolvedLast || !resolvedPhone || !resolvedEmail) {
+        try {
+          const saved = localStorage.getItem('turnar_client_info');
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            if (!resolvedFirst && parsed.first_name) resolvedFirst = parsed.first_name;
+            if (!resolvedLast && parsed.last_name) resolvedLast = parsed.last_name;
+            if (!resolvedEmail && parsed.email) resolvedEmail = parsed.email;
+            if (!resolvedPhone && parsed.phone) resolvedPhone = parsed.phone;
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      // Consultar si el usuario tiene un horario habitual guardado
+      try {
+        const savedHabitual = localStorage.getItem('turnar_habitual_schedule');
+        if (savedHabitual) {
+          const parsedH = JSON.parse(savedHabitual);
+          if (parsedH.dayName && parsedH.time) {
+            setHabitualSchedule(parsedH);
+          }
+        }
+      } catch {
+        // ignore
+      }
+
+      // Completar efectivamente los campos del formulario
+      const hasFirst = Boolean(resolvedFirst.trim());
+      const hasLast = Boolean(resolvedLast.trim());
+      const hasEmail = Boolean(resolvedEmail.trim());
+
+      setForm((prev) => ({
+        ...prev,
+        first_name: prev.first_name || resolvedFirst,
+        last_name: prev.last_name || resolvedLast,
+        email: prev.email || resolvedEmail,
+        phone: prev.phone || resolvedPhone,
+      }));
+
+      // ÚNICAMENTE mostramos autocompletado si nombre, apellido y email están REALMENTE cargados en los inputs
+      if (hasFirst && hasLast && hasEmail) {
+        setIsAutoFilled(true);
+        setEmailOnlyFilled(false);
+      } else if (hasEmail) {
+        setIsAutoFilled(false);
+        setEmailOnlyFilled(true);
+      } else {
+        setIsAutoFilled(false);
+        setEmailOnlyFilled(false);
+      }
+    };
+
+    resolveUser();
   }, [user, profile]);
 
   // Confirmation result
@@ -195,6 +295,22 @@ export const PublicBooking: React.FC = () => {
         available_spots: Math.max(0, s.capacity - s.booked_count),
       }))
     );
+
+    // 3. Cargar reglas aplicables (globales de TURNAR + particulares de la organización)
+    try {
+      const { data: rulesData } = await supabase
+        .from('organization_rules')
+        .select('id, organization_id, title, content, category, requires_acceptance, version')
+        .or(`organization_id.eq.${orgData.id},organization_id.is.null`)
+        .eq('is_active', true)
+        .order('sort_order');
+      if (rulesData && rulesData.length > 0) {
+        setRules(rulesData as RuleItem[]);
+      }
+    } catch {
+      // Conservar DEFAULT_GLOBAL_RULES si no está disponible la tabla remota
+    }
+
     setLoading(false);
   }, [orgSlug]);
 
@@ -233,16 +349,28 @@ export const PublicBooking: React.FC = () => {
     e.preventDefault();
     if (!supabase || !org || !selectedSession) return;
 
+    // Verificar aceptación de condiciones obligatorias si existen
+    const hasMandatoryRules = rules.some((r) => r.requires_acceptance);
+    if (hasMandatoryRules && !rulesAccepted) {
+      setBookingError('Por favor, confirmá la lectura y aceptación de las condiciones de participación antes de confirmar tu reserva.');
+      return;
+    }
+
     setSubmitting(true);
     setBookingError(null);
+
+    const fName = form.first_name.trim();
+    const lName = form.last_name.trim();
+    const em = form.email.trim();
+    const ph = form.phone.trim() || null;
 
     const { data, error } = await supabase.rpc('create_public_booking', {
       p_organization_slug: org.slug,
       p_session_id: selectedSession.id,
-      p_first_name: form.first_name.trim(),
-      p_last_name: form.last_name.trim(),
-      p_email: form.email.trim(),
-      p_phone: form.phone.trim() || null,
+      p_first_name: fName,
+      p_last_name: lName,
+      p_email: em,
+      p_phone: ph,
       p_notes: form.notes.trim() || null,
     });
 
@@ -251,22 +379,92 @@ export const PublicBooking: React.FC = () => {
     if (error) {
       setBookingError(error.message);
     } else if (data && Array.isArray(data) && data.length > 0) {
-      // Guardar datos para que el usuario nunca más tenga que volver a tipear su información
+      const createdBooking = data[0] as { booking_id: string; cancellation_token: string };
+
+      // 1. Guardar datos en navegador para futuras visitas sin reescribir
       try {
         localStorage.setItem(
           'turnar_client_info',
           JSON.stringify({
-            first_name: form.first_name.trim(),
-            last_name: form.last_name.trim(),
-            email: form.email.trim(),
-            phone: form.phone.trim(),
+            first_name: fName,
+            last_name: lName,
+            email: em,
+            phone: ph || '',
           })
         );
       } catch {
         // ignore
       }
 
-      setConfirmedBooking(data[0] as { booking_id: string; cancellation_token: string });
+      // 2. Si eligió recurrencia semanal, registrar preferencia
+      if (recurrenceChoice === 'weekly' && selectedActivity) {
+        const startDt = new Date(selectedSession.start_time);
+        const weekday = startDt.toLocaleDateString('es-AR', { weekday: 'long' });
+        const timeStr = startDt.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+
+        try {
+          localStorage.setItem(
+            'turnar_habitual_schedule',
+            JSON.stringify({
+              dayName: weekday,
+              time: timeStr,
+              actName: selectedActivity.name,
+              orgSlug: org.slug,
+            })
+          );
+          setHabitualSchedule({
+            dayName: weekday,
+            time: timeStr,
+            actName: selectedActivity.name,
+          });
+        } catch {
+          // ignore
+        }
+
+        // Registrar en BD si está disponible la tabla
+        try {
+          await supabase.from('client_recurring_schedules').insert({
+            organization_id: org.id,
+            contact_id: null,
+            activity_id: selectedActivity.id,
+            day_of_week: startDt.getDay(),
+            start_time: startDt.toTimeString().split(' ')[0],
+            duration_minutes: selectedActivity.duration_minutes,
+            status: 'active',
+            notes: `Horario semanal habitual solicitado por ${fName} ${lName} (${em})`,
+          });
+        } catch {
+          // ignore si la tabla remota no está lista
+        }
+      }
+
+      // 3. Registrar aceptación de reglas
+      try {
+        await supabase.from('rule_acceptances').insert({
+          organization_id: org.id,
+          user_id: user?.id || null,
+          email: em,
+          rule_version: 1,
+          booking_id: createdBooking.booking_id,
+        });
+      } catch {
+        // ignore
+      }
+
+      // 4. Si el usuario está autenticado y su perfil tenía nombres vacíos, actualizar perfil sin tocar contraseñas
+      if (user && profile && (!profile.first_name || !profile.last_name)) {
+        try {
+          await supabase.from('profiles').update({
+            first_name: fName,
+            last_name: lName,
+            phone: ph || profile.phone,
+          }).eq('id', user.id);
+        } catch {
+          // ignore
+        }
+      }
+
+      setConfirmedBooking(createdBooking);
       await loadData();
     } else {
       setBookingError('No se pudo completar la reserva.');
@@ -393,6 +591,23 @@ export const PublicBooking: React.FC = () => {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Reconocimiento contextual de Horario Habitual */}
+        {habitualSchedule && !confirmedBooking && (
+          <div className="bg-gradient-to-r from-brand-900 to-brand-800 text-white rounded-2xl p-4 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div>
+              <span className="text-[11px] font-semibold text-terracotta-300 uppercase tracking-wider block">
+                Tu horario habitual reconocido
+              </span>
+              <h3 className="text-sm font-bold mt-0.5">
+                {habitualSchedule.actName} · Todos los {habitualSchedule.dayName}s a las {habitualSchedule.time} hs
+              </h3>
+              <p className="text-xs text-brand-200 mt-0.5">
+                Te sugerimos tu clase habitual para reservar en 1 clic, o podés elegir un horario alternativo para esta semana.
+              </p>
+            </div>
           </div>
         )}
 
@@ -667,30 +882,75 @@ export const PublicBooking: React.FC = () => {
                     </div>
                   )}
 
-                  {isAutoFilled && form.email && (
-                    <div className="mb-3.5 p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-900 flex items-start gap-2.5">
+                  {/* Pregunta contextual: Horario habitual semanal vs Turno puntual */}
+                  <div className="mb-3.5 p-3 rounded-xl bg-brand-50 border border-brand-200">
+                    <label className="text-xs font-bold text-brand-900 block mb-1.5 flex items-center gap-1.5">
+                      <Repeat className="w-3.5 h-3.5 text-brand-700" />
+                      ¿Querés que te reservemos este mismo horario todas las semanas?
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setRecurrenceChoice('weekly')}
+                        className={`p-2 rounded-lg text-left border text-xs transition-all ${
+                          recurrenceChoice === 'weekly'
+                            ? 'bg-brand-900 text-white border-brand-900 font-semibold shadow-xs'
+                            : 'bg-white text-brand-700 border-brand-200 hover:border-brand-400'
+                        }`}
+                      >
+                        <span className="block font-bold">✓ Sí, semanalmente</span>
+                        <span className={`text-[10px] block mt-0.5 ${recurrenceChoice === 'weekly' ? 'text-brand-300' : 'text-brand-500'}`}>
+                          Horario fijo asegurado
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setRecurrenceChoice('single')}
+                        className={`p-2 rounded-lg text-left border text-xs transition-all ${
+                          recurrenceChoice === 'single'
+                            ? 'bg-brand-900 text-white border-brand-900 font-semibold shadow-xs'
+                            : 'bg-white text-brand-700 border-brand-200 hover:border-brand-400'
+                        }`}
+                      >
+                        <span className="block font-bold">Solo esta fecha</span>
+                        <span className={`text-[10px] block mt-0.5 ${recurrenceChoice === 'single' ? 'text-brand-300' : 'text-brand-500'}`}>
+                          Turno único puntual
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Autocompletado honesto y real */}
+                  {isAutoFilled && form.first_name && (
+                    <div className="mb-3 p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-900 flex items-start gap-2.5">
                       <UserCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
                       <div className="flex-1">
-                        <span className="font-bold">Datos cargados automáticamente</span>
+                        <span className="font-bold">Datos reconocidos y cargados</span>
                         <p className="text-[11px] text-emerald-700 mt-0.5">
-                          {form.first_name} {form.last_name} ({form.email})
-                          {form.phone ? ` · ${form.phone}` : ''}
+                          Tus datos ({form.first_name} {form.last_name}) están listos. Podés editarlos si reservás para otra persona.
                         </p>
                       </div>
+                    </div>
+                  )}
+
+                  {emailOnlyFilled && !isAutoFilled && (
+                    <div className="mb-3 p-2 rounded-lg bg-brand-50 border border-brand-200 text-xs text-brand-700 flex items-center gap-2">
+                      <Info className="w-3.5 h-3.5 text-brand-500 shrink-0" />
+                      <span>Completamos tu correo ({form.email}). Ingresá tu nombre para confirmar.</span>
                     </div>
                   )}
 
                   <form onSubmit={handleBookingSubmit} className="space-y-3">
                     <Input
                       label="Nombre"
-                      placeholder="Juan"
+                      placeholder="Ej. Juan"
                       value={form.first_name}
                       onChange={(e) => setForm({ ...form, first_name: e.target.value })}
                       required
                     />
                     <Input
                       label="Apellido"
-                      placeholder="Pérez"
+                      placeholder="Ej. Pérez"
                       value={form.last_name}
                       onChange={(e) => setForm({ ...form, last_name: e.target.value })}
                       required
@@ -710,14 +970,52 @@ export const PublicBooking: React.FC = () => {
                       onChange={(e) => setForm({ ...form, phone: e.target.value })}
                     />
                     <Textarea
-                      label="Comentarios (opcional)"
-                      placeholder="¿Venís con alguien? ¿Tenés experiencia previa?"
+                      label="Observaciones o notas para el espacio (opcional)"
+                      placeholder="Aclaraciones médicas, nivel previo o comentarios..."
                       value={form.notes}
                       onChange={(e) => setForm({ ...form, notes: e.target.value })}
                       rows={2}
                     />
 
-                    <Button type="submit" loading={submitting} className="w-full">
+                    {/* Condiciones de participación */}
+                    <div className="pt-2 border-t border-brand-100">
+                      <div className="p-3 bg-brand-50 rounded-xl border border-brand-200 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-brand-900 flex items-center gap-1.5">
+                            <ShieldCheck className="w-3.5 h-3.5 text-brand-700" />
+                            Condiciones de participación
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setRulesModalOpen(true)}
+                            className="text-[11px] text-brand-600 hover:text-brand-900 underline font-semibold"
+                          >
+                            Ver reglas ({rules.length})
+                          </button>
+                        </div>
+                        <p className="text-[11px] text-brand-600">
+                          Puntualidad, aviso previo de cancelaciones para liberar el cupo y respeto por las normas del espacio.
+                        </p>
+                        <label className="flex items-start gap-2 pt-1 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={rulesAccepted}
+                            onChange={(e) => setRulesAccepted(e.target.checked)}
+                            className="mt-0.5 rounded border-brand-300 text-brand-900 focus:ring-brand-900"
+                          />
+                          <span className="text-xs text-brand-800 font-medium leading-tight">
+                            He leído y acepto las condiciones de participación.
+                          </span>
+                        </label>
+                      </div>
+                    </div>
+
+                    <Button 
+                      type="submit" 
+                      loading={submitting} 
+                      className="w-full"
+                      disabled={rules.some(r => r.requires_acceptance) && !rulesAccepted}
+                    >
                       Confirmar reserva
                     </Button>
                   </form>
@@ -779,6 +1077,90 @@ export const PublicBooking: React.FC = () => {
             </Button>
           </div>
         </form>
+      </Modal>
+
+      {/* Modal de Condiciones de Participación y Lineamientos */}
+      <Modal
+        open={rulesModalOpen}
+        onClose={() => setRulesModalOpen(false)}
+        title="Condiciones de Participación y Lineamientos"
+      >
+        <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
+          {/* Nivel 1: Lineamientos Generales de la plataforma */}
+          <div>
+            <div className="flex items-center gap-2 mb-2 pb-1 border-b border-brand-200">
+              <ShieldCheck className="w-4 h-4 text-brand-900" />
+              <h4 className="text-xs font-bold text-brand-900 uppercase tracking-wider">
+                1. Lineamientos Generales de TURNAR
+              </h4>
+            </div>
+            <div className="space-y-2">
+              {rules
+                .filter((r) => r.organization_id === null)
+                .map((r) => (
+                  <div key={r.id} className="p-3 rounded-xl bg-brand-50 border border-brand-200 text-xs">
+                    <h5 className="font-bold text-brand-900 mb-1">{r.title}</h5>
+                    <p className="text-brand-700 whitespace-pre-line leading-relaxed">{r.content}</p>
+                  </div>
+                ))}
+            </div>
+          </div>
+
+          {/* Nivel 2: Reglas particulares del espacio */}
+          <div>
+            <div className="flex items-center gap-2 mb-2 pb-1 border-b border-brand-200">
+              <FileText className="w-4 h-4 text-terracotta-600" />
+              <h4 className="text-xs font-bold text-brand-900 uppercase tracking-wider">
+                2. Reglas Particulares de {org?.name}
+              </h4>
+            </div>
+            {rules.filter((r) => r.organization_id !== null).length === 0 ? (
+              <div className="p-3 rounded-xl bg-brand-50/50 border border-brand-100 text-xs text-brand-500 italic">
+                Este espacio aplica los lineamientos generales de convivencia y puntualidad estándar de TURNAR.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {rules
+                  .filter((r) => r.organization_id !== null)
+                  .map((r) => (
+                    <div key={r.id} className="p-3 rounded-xl bg-white border border-brand-200 text-xs shadow-2xs">
+                      <div className="flex items-center justify-between mb-1">
+                        <h5 className="font-bold text-brand-900">{r.title}</h5>
+                        <Badge variant="muted" className="text-[10px] capitalize">
+                          {r.category}
+                        </Badge>
+                      </div>
+                      <p className="text-brand-700 whitespace-pre-line leading-relaxed">{r.content}</p>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </div>
+
+          <div className="pt-3 border-t border-brand-100 flex items-center justify-between">
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={rulesAccepted}
+                onChange={(e) => setRulesAccepted(e.target.checked)}
+                className="rounded border-brand-300 text-brand-900 focus:ring-brand-900"
+              />
+              <span className="text-xs text-brand-800 font-semibold">
+                Acepto estas condiciones
+              </span>
+            </label>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => {
+                setRulesAccepted(true);
+                setRulesModalOpen(false);
+              }}
+            >
+              Entendido y aceptar
+            </Button>
+          </div>
+        </div>
       </Modal>
 
       {/* Footer */}

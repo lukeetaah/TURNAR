@@ -10,6 +10,11 @@ import {
   Globe,
   Share2,
   Trash2,
+  FileText,
+  Edit2,
+  ToggleLeft,
+  ToggleRight,
+  ShieldCheck,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useOrg } from '@/contexts/OrgContext';
@@ -303,6 +308,116 @@ export const Settings: React.FC = () => {
   };
 
   const isOwnerOrAdmin = orgRole === 'owner' || orgRole === 'admin' || profile?.is_platform_admin || user?.email === 'lucascorrea@outlook.com.ar';
+
+  // ── Estado: Reglas de la organización ────────────────────────────────────────
+  interface OrgRule {
+    id: string;
+    organization_id: string | null;
+    title: string;
+    body: string;
+    category: string;
+    is_active: boolean;
+    is_mandatory: boolean;
+    version: number;
+  }
+
+  const RULE_CATEGORIES = [
+    { value: 'cancellation', label: 'Cancelaciones' },
+    { value: 'punctuality', label: 'Puntualidad' },
+    { value: 'community', label: 'Convivencia' },
+    { value: 'recovery', label: 'Recuperación de clases' },
+    { value: 'facilities', label: 'Instalaciones' },
+    { value: 'general', label: 'General' },
+  ];
+
+  const [orgRules, setOrgRules] = useState<OrgRule[]>([]);
+  const [loadingRules, setLoadingRules] = useState(false);
+  const [ruleModalOpen, setRuleModalOpen] = useState(false);
+  const [editingRule, setEditingRule] = useState<OrgRule | null>(null);
+  const [ruleForm, setRuleForm] = useState({
+    title: '',
+    body: '',
+    category: 'general',
+    is_mandatory: false,
+  });
+  const [savingRule, setSavingRule] = useState(false);
+  const [ruleError, setRuleError] = useState<string | null>(null);
+
+  const fetchOrgRules = useCallback(async () => {
+    if (!supabase || !orgId) return;
+    setLoadingRules(true);
+    try {
+      const { data } = await supabase
+        .from('organization_rules')
+        .select('*')
+        .or(`organization_id.eq.${orgId},organization_id.is.null`)
+        .order('category')
+        .order('version', { ascending: false });
+      if (data) setOrgRules(data as OrgRule[]);
+    } catch {
+      // tabla aún no migrada
+    }
+    setLoadingRules(false);
+  }, [orgId]);
+
+  useEffect(() => { fetchOrgRules(); }, [fetchOrgRules]);
+
+  const handleSaveRule = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!supabase || !orgId) return;
+    setSavingRule(true);
+    setRuleError(null);
+
+    if (editingRule && editingRule.organization_id === orgId) {
+      // Editar regla propia de esta org
+      const { error: err } = await supabase
+        .from('organization_rules')
+        .update({
+          title: ruleForm.title,
+          body: ruleForm.body,
+          category: ruleForm.category,
+          is_mandatory: ruleForm.is_mandatory,
+          version: (editingRule.version ?? 1) + 1,
+        })
+        .eq('id', editingRule.id);
+      if (err) { setRuleError(err.message); setSavingRule(false); return; }
+    } else {
+      // Crear nueva regla para esta org
+      const { error: err } = await supabase
+        .from('organization_rules')
+        .insert({
+          organization_id: orgId,
+          title: ruleForm.title,
+          body: ruleForm.body,
+          category: ruleForm.category,
+          is_mandatory: ruleForm.is_mandatory,
+          is_active: true,
+          version: 1,
+        });
+      if (err) { setRuleError(err.message); setSavingRule(false); return; }
+    }
+
+    setSavingRule(false);
+    setRuleModalOpen(false);
+    setEditingRule(null);
+    await fetchOrgRules();
+  };
+
+  const handleToggleRule = async (rule: OrgRule) => {
+    if (!supabase || rule.organization_id !== orgId) return; // no tocar reglas globales
+    await supabase
+      .from('organization_rules')
+      .update({ is_active: !rule.is_active })
+      .eq('id', rule.id);
+    await fetchOrgRules();
+  };
+
+  const handleDeleteRule = async (rule: OrgRule) => {
+    if (!supabase || rule.organization_id !== orgId) return;
+    if (!window.confirm('¿Eliminar esta regla de tu espacio?')) return;
+    await supabase.from('organization_rules').delete().eq('id', rule.id);
+    await fetchOrgRules();
+  };
 
   return (
     <div className="p-4 md:p-6 max-w-4xl mx-auto space-y-6">
@@ -655,6 +770,206 @@ export const Settings: React.FC = () => {
             </Button>
             <Button type="submit" loading={inviting}>
               Generar invitación
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* ── Sección: Reglas y Condiciones de Participación ── */}
+      <div className="bg-white border border-brand-200 rounded-xl p-5 shadow-2xs">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-xs font-bold text-brand-900 flex items-center gap-1.5">
+              <ShieldCheck className="w-4 h-4 text-brand-700" />
+              Reglas y condiciones de participación
+            </h2>
+            <p className="text-xs text-brand-400 mt-0.5 leading-relaxed">
+              Configurá las reglas que tus alumnos deben aceptar al reservar un turno.
+              Las reglas globales de TURNAR se muestran en gris y no pueden modificarse.
+            </p>
+          </div>
+          {isOwnerOrAdmin && (
+            <Button
+              size="sm"
+              variant="secondary"
+              icon={<Plus className="w-3.5 h-3.5" />}
+              onClick={() => {
+                setEditingRule(null);
+                setRuleForm({ title: '', body: '', category: 'general', is_mandatory: false });
+                setRuleModalOpen(true);
+              }}
+            >
+              Nueva regla
+            </Button>
+          )}
+        </div>
+
+        {loadingRules ? (
+          <div className="flex justify-center py-8">
+            <span className="w-5 h-5 border-2 border-brand-900 border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : orgRules.length === 0 ? (
+          <div className="text-center py-8 text-xs text-brand-400">
+            <FileText className="w-8 h-8 mx-auto mb-2 opacity-30" />
+            Sin reglas configuradas todavía. Las reglas globales de TURNAR aparecerán automáticamente una vez que corras la migración de base de datos.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {RULE_CATEGORIES.map((cat) => {
+              const catRules = orgRules.filter((r) => r.category === cat.value);
+              if (catRules.length === 0) return null;
+              return (
+                <div key={cat.value}>
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-brand-500 mb-1.5 mt-3">
+                    {cat.label}
+                  </div>
+                  <div className="space-y-1.5">
+                    {catRules.map((rule) => {
+                      const isGlobal = rule.organization_id === null;
+                      return (
+                        <div
+                          key={rule.id}
+                          className={`flex items-start gap-3 p-3 rounded-xl border text-xs ${
+                            isGlobal
+                              ? 'bg-brand-50 border-brand-200 opacity-80'
+                              : rule.is_active
+                              ? 'bg-white border-brand-200'
+                              : 'bg-brand-50/40 border-brand-100 opacity-60'
+                          }`}
+                        >
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-0.5">
+                              <span className="font-semibold text-brand-900">{rule.title}</span>
+                              {isGlobal && (
+                                <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-brand-200 text-brand-600 font-bold">
+                                  TURNAR global
+                                </span>
+                              )}
+                              {rule.is_mandatory && (
+                                <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-amber-100 text-amber-700 font-bold">
+                                  Obligatoria
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-brand-500 leading-relaxed line-clamp-2">{rule.body}</p>
+                          </div>
+                          {!isGlobal && isOwnerOrAdmin && (
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                onClick={() => handleToggleRule(rule)}
+                                className="p-1 rounded hover:bg-brand-100 transition-colors"
+                                title={rule.is_active ? 'Desactivar regla' : 'Activar regla'}
+                              >
+                                {rule.is_active
+                                  ? <ToggleRight className="w-4 h-4 text-emerald-600" />
+                                  : <ToggleLeft className="w-4 h-4 text-brand-400" />
+                                }
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setEditingRule(rule);
+                                  setRuleForm({
+                                    title: rule.title,
+                                    body: rule.body,
+                                    category: rule.category,
+                                    is_mandatory: rule.is_mandatory,
+                                  });
+                                  setRuleModalOpen(true);
+                                }}
+                                className="p-1 rounded hover:bg-brand-100 transition-colors"
+                                title="Editar regla"
+                              >
+                                <Edit2 className="w-3.5 h-3.5 text-brand-500" />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteRule(rule)}
+                                className="p-1 rounded hover:bg-red-50 transition-colors"
+                                title="Eliminar regla"
+                              >
+                                <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Modal Crear/Editar Regla */}
+      <Modal
+        open={ruleModalOpen}
+        onClose={() => { setRuleModalOpen(false); setEditingRule(null); setRuleError(null); }}
+        title={editingRule ? 'Editar regla' : 'Nueva regla de participación'}
+      >
+        <form onSubmit={handleSaveRule} className="space-y-4">
+          {ruleError && (
+            <div className="p-2.5 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+              {ruleError}
+            </div>
+          )}
+
+          <Input
+            label="Título"
+            placeholder="Ej: Política de cancelaciones"
+            value={ruleForm.title}
+            onChange={(e) => setRuleForm((f) => ({ ...f, title: e.target.value }))}
+            required
+          />
+
+          <div>
+            <label className="block text-xs font-semibold text-brand-700 mb-1">Descripción</label>
+            <textarea
+              rows={4}
+              placeholder="Redactá la regla de forma clara y concisa para tus alumnos..."
+              value={ruleForm.body}
+              onChange={(e) => setRuleForm((f) => ({ ...f, body: e.target.value }))}
+              className="w-full text-sm rounded-lg border border-brand-300 px-3 py-2 resize-none"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-brand-700 mb-1">Categoría</label>
+            <select
+              className="w-full text-sm rounded-lg border border-brand-300 px-3 py-2 bg-white"
+              value={ruleForm.category}
+              onChange={(e) => setRuleForm((f) => ({ ...f, category: e.target.value }))}
+            >
+              {RULE_CATEGORIES.map((c) => (
+                <option key={c.value} value={c.value}>{c.label}</option>
+              ))}
+            </select>
+          </div>
+
+          <label className="flex items-center gap-2.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={ruleForm.is_mandatory}
+              onChange={(e) => setRuleForm((f) => ({ ...f, is_mandatory: e.target.checked }))}
+              className="rounded border-brand-300 text-brand-900"
+            />
+            <div>
+              <span className="text-xs font-semibold text-brand-800 block">Aceptación obligatoria</span>
+              <span className="text-[11px] text-brand-400">El alumno debe aceptarla explícitamente para poder reservar.</span>
+            </div>
+          </label>
+
+          <div className="flex justify-end gap-2 pt-2 border-t border-brand-100">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => { setRuleModalOpen(false); setEditingRule(null); setRuleError(null); }}
+            >
+              Cancelar
+            </Button>
+            <Button type="submit" loading={savingRule} icon={<Check className="w-3.5 h-3.5" />}>
+              {editingRule ? 'Guardar cambios' : 'Crear regla'}
             </Button>
           </div>
         </form>

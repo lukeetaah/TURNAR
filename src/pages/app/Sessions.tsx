@@ -16,11 +16,17 @@ import {
   Phone,
   Mail,
   CheckCircle2,
+  RotateCcw,
+  History,
+  Clock,
+  Plus,
+  Layers,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import { useOrg } from '@/contexts/OrgContext';
 import { useActivities, type Activity } from '@/hooks/useActivities';
 import { useContacts } from '@/hooks/useContacts';
+import { useSchedules, type ActivitySchedule } from '@/hooks/useSchedules';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { Input } from '@/components/ui/Input';
@@ -190,6 +196,40 @@ export const Sessions: React.FC = () => {
   // Modal auto-agendar mensual
   const [monthModalOpen, setMonthModalOpen] = useState(false);
   const [cloningMonth, setCloningMonth] = useState(false);
+
+  // Pestañas: Calendario vs Agenda Habitual
+  const [viewTab, setViewTab] = useState<'calendar' | 'schedules'>('calendar');
+
+  // Integración de Agenda Habitual y Operaciones Masivas (useSchedules)
+  const {
+    schedules,
+    batches,
+    createSchedule,
+    updateSchedule,
+    deleteSchedule,
+    generateSessionsFromSchedules,
+    undoBatchOperation,
+  } = useSchedules(orgId);
+
+  // Modal de Historial de Operaciones Masivas y Deshacer
+  const [historyModalOpen, setHistoryModalOpen] = useState(false);
+  const [undoingBatchId, setUndoingBatchId] = useState<string | null>(null);
+
+  // Modal Generar desde Agenda Habitual
+  const [genScheduleModalOpen, setGenScheduleModalOpen] = useState(false);
+  const [genScheduleWeeks, setGenScheduleWeeks] = useState<number>(4);
+  const [generatingFromSchedule, setGeneratingFromSchedule] = useState(false);
+
+  // Modal Crear/Editar Horario Habitual
+  const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
+  const [editingSchedule, setEditingSchedule] = useState<ActivitySchedule | null>(null);
+  const [scheduleForm, setScheduleForm] = useState({
+    activity_id: '',
+    day_of_week: 1,
+    start_time: '18:00',
+    end_time: '20:00',
+    capacity_override: 10,
+  });
 
   // Drag & Drop
   const dragRef = useRef<DragState | null>(null);
@@ -446,6 +486,93 @@ export const Sessions: React.FC = () => {
     }
   };
 
+  // ── Generar turnos desde la Agenda Habitual ────────────────────────────────
+  const handleGenerateFromSchedule = async () => {
+    setGeneratingFromSchedule(true);
+    setError(null);
+
+    const actMap: Record<string, { default_capacity: number; name: string }> = {};
+    activities.forEach((a) => {
+      actMap[a.id] = { default_capacity: a.default_capacity, name: a.name };
+    });
+
+    const res = await generateSessionsFromSchedules(weekStart, genScheduleWeeks, actMap);
+    setGeneratingFromSchedule(false);
+    setGenScheduleModalOpen(false);
+
+    if (res.error) {
+      setError(res.error);
+    } else {
+      setSuccessMsg(`¡Listo! Se crearon ${res.count} turnos a partir de la Agenda Habitual para ${genScheduleWeeks} semanas.`);
+      setTimeout(() => setSuccessMsg(null), 5000);
+      await loadSessions();
+    }
+  };
+
+  // ── Deshacer operación masiva (Undo) ───────────────────────────────────────
+  const handleUndoBatch = async (batchId: string) => {
+    if (!window.confirm('¿Confirmás deshacer esta operación masiva? Se eliminarán los turnos generados que no tengan alumnos inscriptos.')) {
+      return;
+    }
+
+    setUndoingBatchId(batchId);
+    setError(null);
+
+    const res = await undoBatchOperation(batchId);
+    setUndoingBatchId(null);
+
+    if (res.error) {
+      setError(res.error);
+    } else if (res.blockedCount > 0) {
+      setSuccessMsg(`Operación revertida parcialmente: se eliminaron ${res.deletedCount} turnos vacíos. ${res.blockedCount} turnos no se borraron porque ya contaban con alumnos inscriptos.`);
+      setTimeout(() => setSuccessMsg(null), 6000);
+      await loadSessions();
+    } else {
+      setSuccessMsg(`¡Operación revertida con éxito! Se eliminaron los ${res.deletedCount} turnos generados.`);
+      setTimeout(() => setSuccessMsg(null), 5000);
+      await loadSessions();
+    }
+  };
+
+  // ── Guardar / Modificar Horario Habitual (Agenda) ─────────────────────────
+  const handleSaveSchedule = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!scheduleForm.activity_id) {
+      setError('Seleccioná una actividad para el horario habitual.');
+      return;
+    }
+
+    let err: string | null = null;
+    if (editingSchedule) {
+      const res = await updateSchedule(editingSchedule.id, {
+        activity_id: scheduleForm.activity_id,
+        day_of_week: Number(scheduleForm.day_of_week),
+        start_time: scheduleForm.start_time,
+        end_time: scheduleForm.end_time,
+        capacity_override: Number(scheduleForm.capacity_override),
+      });
+      err = res.error;
+    } else {
+      const res = await createSchedule({
+        activity_id: scheduleForm.activity_id,
+        day_of_week: Number(scheduleForm.day_of_week),
+        start_time: scheduleForm.start_time,
+        end_time: scheduleForm.end_time,
+        capacity_override: Number(scheduleForm.capacity_override),
+      });
+      err = res.error;
+    }
+
+    if (err) {
+      setError(err);
+    } else {
+      setScheduleModalOpen(false);
+      setEditingSchedule(null);
+      setSuccessMsg('Horario habitual guardado correctamente.');
+      setTimeout(() => setSuccessMsg(null), 4000);
+    }
+  };
+
   // ── Guardar edición inline ─────────────────────────────────────────────────
   const saveEdit = async () => {
     if (!supabase || !editingId) return;
@@ -697,42 +824,133 @@ export const Sessions: React.FC = () => {
   return (
     <div className="flex flex-col h-full">
       {/* ── Barra superior ── */}
-      <div className="flex flex-wrap items-center justify-between gap-3 px-4 md:px-6 py-4 border-b border-brand-200 bg-white shrink-0">
-        <div>
-          <h1 className="text-lg font-bold text-brand-900">Sesiones y Horarios</h1>
-          <p className="text-xs text-brand-400">
-            Hacé clic en el calendario para crear, arrastrá para mover, o tocá una clase para sumar alumnos
-          </p>
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 md:px-6 py-3.5 border-b border-brand-200 bg-white shrink-0">
+        <div className="flex flex-wrap items-center gap-4">
+          <div>
+            <h1 className="text-lg font-bold text-brand-900">Sesiones y Horarios</h1>
+            <p className="text-xs text-brand-400">
+              {viewTab === 'calendar'
+                ? 'Arrastrá clases para moverlas, hacé clic para sumar alumnos o editarlas'
+                : 'Definí las plantillas fijas semanales de tu espacio'}
+            </p>
+          </div>
+
+          {/* Selector de Pestaña */}
+          <div className="flex bg-brand-100/80 p-1 rounded-xl border border-brand-200/60">
+            <button
+              onClick={() => setViewTab('calendar')}
+              className={`px-3 py-1 text-xs font-bold rounded-lg transition-all ${
+                viewTab === 'calendar'
+                  ? 'bg-white text-brand-900 shadow-xs'
+                  : 'text-brand-600 hover:text-brand-900'
+              }`}
+            >
+              Turnos y Calendario
+            </button>
+            <button
+              onClick={() => setViewTab('schedules')}
+              className={`px-3 py-1 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 ${
+                viewTab === 'schedules'
+                  ? 'bg-white text-brand-900 shadow-xs'
+                  : 'text-brand-600 hover:text-brand-900'
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5 text-brand-700" />
+              <span>Agenda Habitual</span>
+              {schedules.length > 0 && (
+                <span className="px-1.5 py-0.2 text-[10px] rounded-full bg-brand-200 text-brand-800">
+                  {schedules.length}
+                </span>
+              )}
+            </button>
+          </div>
         </div>
+
         <div className="flex flex-wrap items-center gap-2">
+          {/* Botón Historial de operaciones masivas / Deshacer */}
           <Button
             variant="ghost"
             size="sm"
-            icon={<Copy className="w-3.5 h-3.5" />}
-            onClick={copyPreviousWeek}
-            loading={saving === 'batch'}
-            title="Copia todas las clases de la semana anterior a esta semana"
+            icon={<History className="w-3.5 h-3.5" />}
+            onClick={() => setHistoryModalOpen(true)}
+            title="Ver historial de operaciones y deshacer de forma segura"
           >
-            Copiar semana anterior
+            Historial / Deshacer
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            icon={<Calendar className="w-3.5 h-3.5" />}
-            onClick={() => setMonthModalOpen(true)}
-            title="Replicar el mes anterior automáticamente"
-          >
-            📅 Repetir mes anterior
-          </Button>
-          <Button
-            variant="primary"
-            size="sm"
-            icon={<Zap className="w-3.5 h-3.5" />}
-            onClick={() => { setGenForm((f) => ({ ...f, activity_id: activities[0]?.id ?? '' })); setGenOpen(true); }}
-            disabled={activities.length === 0}
-          >
-            Generar semana
-          </Button>
+
+          {viewTab === 'calendar' ? (
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={<Copy className="w-3.5 h-3.5" />}
+                onClick={copyPreviousWeek}
+                loading={saving === 'batch'}
+                title="Copia todas las clases de la semana anterior a esta semana"
+              >
+                Copiar semana anterior
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={<Calendar className="w-3.5 h-3.5" />}
+                onClick={() => setMonthModalOpen(true)}
+                title="Replicar el mes anterior automáticamente"
+              >
+                📅 Repetir mes anterior
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                icon={<Zap className="w-3.5 h-3.5 text-brand-700" />}
+                onClick={() => setGenScheduleModalOpen(true)}
+                disabled={schedules.length === 0}
+                title="Proyectar turnos en el calendario usando la Agenda Habitual"
+              >
+                Proyectar Agenda Habitual
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                icon={<Plus className="w-3.5 h-3.5" />}
+                onClick={() => { setGenForm((f) => ({ ...f, activity_id: activities[0]?.id ?? '' })); setGenOpen(true); }}
+                disabled={activities.length === 0}
+              >
+                Generar semana rápida
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button
+                variant="secondary"
+                size="sm"
+                icon={<Zap className="w-3.5 h-3.5 text-brand-700" />}
+                onClick={() => setGenScheduleModalOpen(true)}
+                disabled={schedules.length === 0}
+              >
+                Proyectar al calendario
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                icon={<Plus className="w-3.5 h-3.5" />}
+                onClick={() => {
+                  setEditingSchedule(null);
+                  setScheduleForm({
+                    activity_id: activities[0]?.id ?? '',
+                    day_of_week: 1,
+                    start_time: '18:00',
+                    end_time: '19:00',
+                    capacity_override: 10,
+                  });
+                  setScheduleModalOpen(true);
+                }}
+                disabled={activities.length === 0}
+              >
+                Nuevo horario habitual
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
@@ -792,8 +1010,162 @@ export const Sessions: React.FC = () => {
         </div>
       )}
 
+      {/* ── Vista: Agenda Habitual (plantillas semanales) ── */}
+      {viewTab === 'schedules' && (
+        <div className="flex-1 overflow-auto p-4 md:p-6">
+          {schedules.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-20 text-center">
+              <Layers className="w-12 h-12 text-brand-300 mb-4" />
+              <h3 className="text-base font-bold text-brand-800 mb-1">Sin horarios habituales</h3>
+              <p className="text-xs text-brand-400 max-w-xs mb-5">
+                Definí la agenda fija de tu espacio: actividades, días y horarios. Luego podés proyectar automáticamente sesiones en el calendario.
+              </p>
+              <Button
+                variant="primary"
+                size="sm"
+                icon={<Plus className="w-3.5 h-3.5" />}
+                onClick={() => {
+                  setEditingSchedule(null);
+                  setScheduleForm({
+                    activity_id: activities[0]?.id ?? '',
+                    day_of_week: 1,
+                    start_time: '18:00',
+                    end_time: '19:00',
+                    capacity_override: 10,
+                  });
+                  setScheduleModalOpen(true);
+                }}
+                disabled={activities.length === 0}
+              >
+                Agregar horario habitual
+              </Button>
+              {activities.length === 0 && (
+                <p className="text-xs text-amber-700 mt-3">
+                  Primero creá una actividad en la sección <strong>Actividades</strong>.
+                </p>
+              )}
+            </div>
+          ) : (
+            <div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
+                {(['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'] as const).map((dayLabel, dayNum) => {
+                  // dayNum 0=Lun...5=Sáb,6=Dom → day_of_week 1=Lun...6=Sáb,0=Dom
+                  const dow = dayNum === 6 ? 0 : dayNum + 1;
+                  const daySched = schedules.filter((s) => s.day_of_week === dow);
+                  if (daySched.length === 0) return null;
+                  return (
+                    <div key={dayLabel} className="bg-white border border-brand-200 rounded-xl p-4 shadow-2xs">
+                      <div className="text-xs font-bold text-brand-700 uppercase tracking-wider mb-3 pb-2 border-b border-brand-100">
+                        {dayLabel}
+                      </div>
+                      <div className="space-y-2">
+                        {daySched.map((sch) => {
+                          const act = activities.find((a) => a.id === sch.activity_id);
+                          const color = colorForActivity(sch.activity_id, activities);
+                          return (
+                            <div
+                              key={sch.id}
+                              className={`flex items-center justify-between gap-2 p-2.5 rounded-lg border ${color.bg} ${color.border} ${color.text}`}
+                            >
+                              <div className="flex-1 min-w-0">
+                                <div className="font-semibold text-xs truncate">{act?.name ?? '—'}</div>
+                                <div className="text-[10px] opacity-75 mt-0.5">
+                                  {sch.start_time.slice(0, 5)} – {sch.end_time.slice(0, 5)}
+                                  {sch.capacity_override ? ` · ${sch.capacity_override} cupos` : ''}
+                                </div>
+                              </div>
+                              <div className="flex gap-1 shrink-0">
+                                <button
+                                  onClick={() => {
+                                    setEditingSchedule(sch);
+                                    setScheduleForm({
+                                      activity_id: sch.activity_id,
+                                      day_of_week: sch.day_of_week,
+                                      start_time: sch.start_time.slice(0, 5),
+                                      end_time: sch.end_time.slice(0, 5),
+                                      capacity_override: sch.capacity_override ?? 10,
+                                    });
+                                    setScheduleModalOpen(true);
+                                  }}
+                                  className="p-1 rounded hover:bg-white/60 transition-colors"
+                                  title="Editar"
+                                >
+                                  <Clock className="w-3 h-3" />
+                                </button>
+                                <button
+                                  onClick={async () => {
+                                    if (!window.confirm(`¿Eliminar el horario habitual de ${act?.name} el ${dayLabel}?`)) return;
+                                    const res = await deleteSchedule(sch.id);
+                                    if (res.error) setError(res.error);
+                                  }}
+                                  className="p-1 rounded hover:bg-white/60 transition-colors"
+                                  title="Eliminar"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <button
+                        className="mt-2 w-full text-[11px] text-brand-400 hover:text-brand-700 py-1 rounded-lg hover:bg-brand-50 transition-colors flex items-center justify-center gap-1"
+                        onClick={() => {
+                          setEditingSchedule(null);
+                          setScheduleForm({
+                            activity_id: activities[0]?.id ?? '',
+                            day_of_week: dow,
+                            start_time: '18:00',
+                            end_time: '19:00',
+                            capacity_override: 10,
+                          });
+                          setScheduleModalOpen(true);
+                        }}
+                      >
+                        <Plus className="w-3 h-3" /> Agregar horario
+                      </button>
+                    </div>
+                  );
+                })}
+
+                {/* Tarjeta para días sin horario: añadir nuevo */}
+                <div className="bg-brand-50 border border-dashed border-brand-300 rounded-xl p-4 flex flex-col items-center justify-center text-center min-h-[120px]">
+                  <button
+                    onClick={() => {
+                      setEditingSchedule(null);
+                      setScheduleForm({
+                        activity_id: activities[0]?.id ?? '',
+                        day_of_week: 1,
+                        start_time: '09:00',
+                        end_time: '10:00',
+                        capacity_override: 10,
+                      });
+                      setScheduleModalOpen(true);
+                    }}
+                    className="flex flex-col items-center gap-1.5 text-brand-500 hover:text-brand-800 transition-colors"
+                    disabled={activities.length === 0}
+                  >
+                    <Plus className="w-6 h-6" />
+                    <span className="text-xs font-semibold">Nuevo horario habitual</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-xl bg-blue-50 border border-blue-200 text-xs text-blue-800 flex gap-2">
+                <Zap className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
+                <div>
+                  <strong>¿Cómo funciona?</strong> Esta agenda es el molde de tu espacio.
+                  Usá <em>Proyectar al calendario</em> para generar los turnos reales en las fechas concretas.
+                  Podés proyectar 1 semana, 2 semanas o 1 mes completo.
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── Grilla del calendario ── */}
-      <div className="flex-1 overflow-auto select-none">
+      {viewTab === 'calendar' && <div className="flex-1 overflow-auto select-none">
         {loading ? (
           <div className="flex justify-center items-center h-40">
             <span className="w-5 h-5 border-2 border-brand-900 border-t-transparent rounded-full animate-spin" />
@@ -1048,10 +1420,10 @@ export const Sessions: React.FC = () => {
             </div>
           </div>
         )}
-      </div>
+      </div>}
 
-      {/* Tooltip de ayuda */}
-      {activities.length === 0 && (
+      {/* Tooltip de ayuda — sólo en calendario */}
+      {viewTab === 'calendar' && activities.length === 0 && (
         <div className="mx-4 mb-4 p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800">
           Primero creá al menos una actividad en la sección <strong>Actividades</strong> para poder programar sesiones.
         </div>
@@ -1454,6 +1826,246 @@ export const Sessions: React.FC = () => {
             </Button>
           </div>
         </div>
+      </Modal>
+
+      {/* ── Modal Historial de Operaciones y Deshacer ── */}
+      <Modal
+        open={historyModalOpen}
+        onClose={() => setHistoryModalOpen(false)}
+        title="🕓 Historial de operaciones masivas"
+      >
+        <div className="space-y-3">
+          <p className="text-xs text-brand-500 leading-relaxed">
+            Acá podés ver las operaciones masivas recientes y deshacer aquellas que no tengan alumnos inscriptos.
+            Las sesiones con inscriptos <strong>no se eliminan</strong> para proteger los datos de los participantes.
+          </p>
+
+          {batches.length === 0 ? (
+            <div className="text-center py-8 text-xs text-brand-400">
+              <History className="w-8 h-8 mx-auto mb-2 opacity-30" />
+              Sin operaciones masivas registradas todavía.
+            </div>
+          ) : (
+            <div className="space-y-2 max-h-80 overflow-y-auto">
+              {batches.map((b) => (
+                <div
+                  key={b.id}
+                  className={`p-3 rounded-xl border text-xs ${
+                    b.is_reverted
+                      ? 'bg-brand-50 border-brand-200 opacity-60'
+                      : 'bg-white border-brand-200'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-brand-800 truncate">{b.description}</div>
+                      <div className="text-brand-400 mt-0.5">
+                        {b.affected_count} sesiones · {new Date(b.created_at).toLocaleDateString('es-AR', {
+                          day: 'numeric', month: 'short', year: 'numeric',
+                        })}
+                      </div>
+                      {b.is_reverted && (
+                        <span className="inline-block mt-1 px-2 py-0.5 rounded-full bg-brand-200 text-brand-600 text-[10px] font-bold">
+                          Ya revertida
+                        </span>
+                      )}
+                    </div>
+                    {!b.is_reverted && (
+                      <Button
+                        size="xs"
+                        variant="ghost"
+                        icon={<RotateCcw className="w-3.5 h-3.5" />}
+                        loading={undoingBatchId === b.id}
+                        onClick={() => handleUndoBatch(b.id)}
+                        className="text-amber-700 hover:text-amber-800 hover:bg-amber-50 shrink-0"
+                      >
+                        Deshacer
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="flex justify-end pt-2 border-t border-brand-100">
+            <Button variant="secondary" onClick={() => setHistoryModalOpen(false)}>
+              Cerrar
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* ── Modal Proyectar Agenda Habitual al Calendario ── */}
+      <Modal
+        open={genScheduleModalOpen}
+        onClose={() => setGenScheduleModalOpen(false)}
+        title="⚡ Proyectar Agenda Habitual al Calendario"
+      >
+        <div className="space-y-4">
+          {schedules.length === 0 ? (
+            <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800">
+              No tenés horarios habituales configurados.
+              Andá a la pestaña <strong>Agenda Habitual</strong> para crearlos primero.
+            </div>
+          ) : (
+            <>
+              <div className="p-3.5 rounded-xl bg-brand-50 border border-brand-200 text-xs text-brand-700 space-y-2">
+                <div className="font-bold text-brand-900">¿Qué va a pasar?</div>
+                <p>
+                  El sistema va a generar turnos reales en el calendario a partir de los{' '}
+                  <strong>{schedules.filter((s) => s.is_active).length} horarios habituales activos</strong>.
+                </p>
+                <p>
+                  Las sesiones se van a crear con un identificador de lote para que puedas deshacer la operación completa si cometés un error.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-brand-700 mb-2">
+                  ¿Con qué horizonte proyectás?
+                </label>
+                <div className="grid grid-cols-4 gap-2">
+                  {[1, 2, 4, 8].map((w) => (
+                    <button
+                      key={w}
+                      onClick={() => setGenScheduleWeeks(w)}
+                      className={`py-2.5 rounded-xl border text-xs font-bold transition-all ${
+                        genScheduleWeeks === w
+                          ? 'bg-brand-900 text-white border-brand-900'
+                          : 'bg-white text-brand-700 border-brand-300 hover:border-brand-500'
+                      }`}
+                    >
+                      {w === 1 ? '1 sem' : w === 2 ? '2 sem' : w === 4 ? '1 mes' : '2 meses'}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-2 text-[11px] text-brand-400">
+                  Sesiones que se crearán: aprox.{' '}
+                  <strong>
+                    {schedules.filter((s) => s.is_active).length * genScheduleWeeks}
+                  </strong>{' '}
+                  turnos (desde {fmtDate(weekStart)} en adelante).
+                </p>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-brand-100">
+                <Button variant="secondary" onClick={() => setGenScheduleModalOpen(false)}>
+                  Cancelar
+                </Button>
+                <Button
+                  onClick={handleGenerateFromSchedule}
+                  loading={generatingFromSchedule}
+                  icon={<Zap className="w-3.5 h-3.5" />}
+                >
+                  Proyectar {genScheduleWeeks === 1 ? '1 semana' : genScheduleWeeks === 4 ? '1 mes' : `${genScheduleWeeks} semanas`}
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
+      </Modal>
+
+      {/* ── Modal Crear / Editar Horario Habitual ── */}
+      <Modal
+        open={scheduleModalOpen}
+        onClose={() => { setScheduleModalOpen(false); setEditingSchedule(null); }}
+        title={editingSchedule ? 'Editar horario habitual' : 'Nuevo horario habitual'}
+      >
+        <form onSubmit={handleSaveSchedule} className="space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-brand-700 mb-1">Actividad</label>
+            <select
+              className="w-full text-sm rounded-lg border border-brand-300 px-3 py-2 bg-white"
+              value={scheduleForm.activity_id}
+              onChange={(e) => setScheduleForm((f) => ({ ...f, activity_id: e.target.value }))}
+              required
+            >
+              <option value="">Seleccioná una actividad...</option>
+              {activities.map((a) => (
+                <option key={a.id} value={a.id}>{a.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-brand-700 mb-2">Día de la semana</label>
+            <div className="flex gap-1.5">
+              {[
+                { label: 'L', value: 1 },
+                { label: 'M', value: 2 },
+                { label: 'X', value: 3 },
+                { label: 'J', value: 4 },
+                { label: 'V', value: 5 },
+                { label: 'S', value: 6 },
+                { label: 'D', value: 0 },
+              ].map(({ label, value }) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setScheduleForm((f) => ({ ...f, day_of_week: value }))}
+                  className={`flex-1 py-2 rounded-lg text-xs font-bold transition-colors ${
+                    scheduleForm.day_of_week === value
+                      ? 'bg-brand-900 text-white'
+                      : 'bg-brand-100 text-brand-500 hover:bg-brand-200'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-brand-700 mb-1">Hora de inicio</label>
+              <input
+                type="time"
+                value={scheduleForm.start_time}
+                onChange={(e) => setScheduleForm((f) => ({ ...f, start_time: e.target.value }))}
+                className="w-full text-sm rounded-lg border border-brand-300 px-3 py-2"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-brand-700 mb-1">Hora de fin</label>
+              <input
+                type="time"
+                value={scheduleForm.end_time}
+                onChange={(e) => setScheduleForm((f) => ({ ...f, end_time: e.target.value }))}
+                className="w-full text-sm rounded-lg border border-brand-300 px-3 py-2"
+                required
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-brand-700 mb-1">
+              Cupo para esta franja (sobrescribe el predeterminado de la actividad)
+            </label>
+            <input
+              type="number"
+              min={1}
+              value={scheduleForm.capacity_override}
+              onChange={(e) => setScheduleForm((f) => ({ ...f, capacity_override: Number(e.target.value) }))}
+              className="w-full text-sm rounded-lg border border-brand-300 px-3 py-2"
+              required
+            />
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2 border-t border-brand-100">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => { setScheduleModalOpen(false); setEditingSchedule(null); }}
+            >
+              Cancelar
+            </Button>
+            <Button type="submit" icon={<Check className="w-3.5 h-3.5" />}>
+              {editingSchedule ? 'Guardar cambios' : 'Crear horario habitual'}
+            </Button>
+          </div>
+        </form>
       </Modal>
     </div>
   );
