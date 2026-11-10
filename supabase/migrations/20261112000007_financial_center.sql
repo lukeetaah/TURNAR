@@ -313,6 +313,9 @@ BEGIN
 END;
 $$;
 
+GRANT EXECUTE ON FUNCTION public.get_financial_kpis(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.impute_payment_to_charge(UUID, UUID, UUID) TO authenticated;
+
 -- -----------------------------------------------------------------------------
 -- 10. POLÍTICAS RLS (ROW LEVEL SECURITY) MULTI-TENANT ESTRICTAS
 -- -----------------------------------------------------------------------------
@@ -324,13 +327,15 @@ ALTER TABLE public.charges ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.charge_payments ENABLE ROW LEVEL SECURITY;
 
 -- payment_methods_config: lectura pública/miembros, edición admin
+DROP POLICY IF EXISTS p_payment_methods_select ON public.payment_methods_config;
 CREATE POLICY p_payment_methods_select ON public.payment_methods_config
 FOR SELECT USING (
-    public.has_org_role(organization_id, ARRAY['owner', 'admin', 'instructor', 'member']::public.organization_role[])
+    public.has_org_role(organization_id, ARRAY['owner', 'admin', 'instructor', 'client']::public.organization_role[])
     OR public.is_platform_admin()
     OR is_active = TRUE
 );
 
+DROP POLICY IF EXISTS p_payment_methods_admin ON public.payment_methods_config;
 CREATE POLICY p_payment_methods_admin ON public.payment_methods_config
 FOR ALL USING (
     public.has_org_role(organization_id, ARRAY['owner', 'admin']::public.organization_role[])
@@ -338,13 +343,15 @@ FOR ALL USING (
 );
 
 -- fee_concepts: lectura abierta para miembros de la org, administración owner/admin
+DROP POLICY IF EXISTS p_fee_concepts_select ON public.fee_concepts;
 CREATE POLICY p_fee_concepts_select ON public.fee_concepts
 FOR SELECT USING (
-    public.has_org_role(organization_id, ARRAY['owner', 'admin', 'instructor', 'member']::public.organization_role[])
+    public.has_org_role(organization_id, ARRAY['owner', 'admin', 'instructor', 'client']::public.organization_role[])
     OR public.is_platform_admin()
     OR is_active = TRUE
 );
 
+DROP POLICY IF EXISTS p_fee_concepts_modify ON public.fee_concepts;
 CREATE POLICY p_fee_concepts_modify ON public.fee_concepts
 FOR ALL USING (
     public.has_org_role(organization_id, ARRAY['owner', 'admin']::public.organization_role[])
@@ -352,12 +359,14 @@ FOR ALL USING (
 );
 
 -- fee_concept_versions:
+DROP POLICY IF EXISTS p_fee_concept_versions_select ON public.fee_concept_versions;
 CREATE POLICY p_fee_concept_versions_select ON public.fee_concept_versions
 FOR SELECT USING (
-    public.has_org_role(organization_id, ARRAY['owner', 'admin', 'instructor', 'member']::public.organization_role[])
+    public.has_org_role(organization_id, ARRAY['owner', 'admin', 'instructor', 'client']::public.organization_role[])
     OR public.is_platform_admin()
 );
 
+DROP POLICY IF EXISTS p_fee_concept_versions_modify ON public.fee_concept_versions;
 CREATE POLICY p_fee_concept_versions_modify ON public.fee_concept_versions
 FOR ALL USING (
     public.has_org_role(organization_id, ARRAY['owner', 'admin']::public.organization_role[])
@@ -365,13 +374,15 @@ FOR ALL USING (
 );
 
 -- activity_materials:
+DROP POLICY IF EXISTS p_activity_materials_select ON public.activity_materials;
 CREATE POLICY p_activity_materials_select ON public.activity_materials
 FOR SELECT USING (
-    public.has_org_role(organization_id, ARRAY['owner', 'admin', 'instructor', 'member']::public.organization_role[])
+    public.has_org_role(organization_id, ARRAY['owner', 'admin', 'instructor', 'client']::public.organization_role[])
     OR public.is_platform_admin()
     OR is_active = TRUE
 );
 
+DROP POLICY IF EXISTS p_activity_materials_modify ON public.activity_materials;
 CREATE POLICY p_activity_materials_modify ON public.activity_materials
 FOR ALL USING (
     public.has_org_role(organization_id, ARRAY['owner', 'admin']::public.organization_role[])
@@ -379,6 +390,7 @@ FOR ALL USING (
 );
 
 -- charges:
+DROP POLICY IF EXISTS p_charges_select ON public.charges;
 CREATE POLICY p_charges_select ON public.charges
 FOR SELECT USING (
     public.has_org_role(organization_id, ARRAY['owner', 'admin', 'instructor']::public.organization_role[])
@@ -389,6 +401,7 @@ FOR SELECT USING (
     )
 );
 
+DROP POLICY IF EXISTS p_charges_modify ON public.charges;
 CREATE POLICY p_charges_modify ON public.charges
 FOR ALL USING (
     public.has_org_role(organization_id, ARRAY['owner', 'admin']::public.organization_role[])
@@ -396,12 +409,14 @@ FOR ALL USING (
 );
 
 -- charge_payments:
+DROP POLICY IF EXISTS p_charge_payments_select ON public.charge_payments;
 CREATE POLICY p_charge_payments_select ON public.charge_payments
 FOR SELECT USING (
     public.has_org_role(organization_id, ARRAY['owner', 'admin', 'instructor']::public.organization_role[])
     OR public.is_platform_admin()
 );
 
+DROP POLICY IF EXISTS p_charge_payments_modify ON public.charge_payments;
 CREATE POLICY p_charge_payments_modify ON public.charge_payments
 FOR ALL USING (
     public.has_org_role(organization_id, ARRAY['owner', 'admin']::public.organization_role[])
