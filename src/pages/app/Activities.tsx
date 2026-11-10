@@ -9,6 +9,7 @@ import {
   Archive,
   AlertTriangle,
   Info,
+  RotateCcw,
 } from 'lucide-react';
 import { useOrg } from '@/contexts/OrgContext';
 import { useActivities, type Activity, type ActivityDependencies } from '@/hooks/useActivities';
@@ -28,6 +29,7 @@ export const Activities: React.FC = () => {
     updateActivityWithScope,
     analyzeActivityDependencies,
     archiveActivity,
+    unarchiveActivity,
     deleteActivityIntelligent,
   } = useActivities(orgId, true);
 
@@ -155,7 +157,40 @@ export const Activities: React.FC = () => {
       });
       setTimeout(() => {
         setLifecycleModalOpen(false);
-      }, 1800);
+      }, 1500);
+    }
+  };
+
+  // Reactivar rápido desde la tarjeta
+  const handleQuickUnarchive = async (act: Activity) => {
+    if (!window.confirm(`¿Reactivar "${act.name}"? Volverá a estar visible en tu listado activo y disponible para reservas públicas.`)) {
+      return;
+    }
+    const res = await unarchiveActivity(act.id);
+    if (res.error) {
+      alert(`Error al reactivar: ${res.error}`);
+    }
+  };
+
+  // Reactivar desde el modal
+  const handleModalUnarchive = async () => {
+    if (!targetActivity) return;
+    setActionLoading(true);
+    setActionMsg(null);
+
+    const res = await unarchiveActivity(targetActivity.id);
+    setActionLoading(false);
+
+    if (res.error) {
+      setActionMsg({ type: 'err', text: res.error });
+    } else {
+      setActionMsg({
+        type: 'ok',
+        text: '¡Actividad reactivada con éxito! Ya se encuentra en tu listado activo.',
+      });
+      setTimeout(() => {
+        setLifecycleModalOpen(false);
+      }, 1500);
     }
   };
 
@@ -177,7 +212,7 @@ export const Activities: React.FC = () => {
       });
       setTimeout(() => {
         setLifecycleModalOpen(false);
-      }, 1800);
+      }, 1500);
     }
   };
 
@@ -215,13 +250,13 @@ export const Activities: React.FC = () => {
             </button>
             <button
               onClick={() => setTabFilter('archived')}
-              className={`px-3 py-1 rounded-lg transition-all flex items-center gap-1 ${
+              className={`px-3 py-1 rounded-lg transition-all flex items-center gap-1.5 ${
                 tabFilter === 'archived'
                   ? 'bg-white text-brand-900 shadow-xs'
                   : 'text-brand-600 hover:text-brand-900'
               }`}
             >
-              <Archive className="w-3 h-3" />
+              <Archive className="w-3.5 h-3.5 text-brand-600" />
               <span>Archivadas ({archivedCount})</span>
             </button>
           </div>
@@ -266,7 +301,7 @@ export const Activities: React.FC = () => {
               key={act.id}
               className={`bg-white rounded-xl border p-4 shadow-2xs transition-all flex flex-col justify-between ${
                 act.is_archived
-                  ? 'border-brand-200 bg-brand-50/40 opacity-80'
+                  ? 'border-brand-200 bg-brand-50/40 opacity-85'
                   : 'border-brand-200 hover:border-brand-300'
               }`}
             >
@@ -309,7 +344,7 @@ export const Activities: React.FC = () => {
               <div className="flex items-center justify-between pt-3 border-t border-brand-100 mt-2">
                 <span className="text-[11px] text-brand-400 flex items-center gap-1">
                   {act.is_archived ? (
-                    <span className="text-brand-400 italic">Fuera de publicación</span>
+                    <span className="text-brand-500 font-medium">Fuera de reservas</span>
                   ) : act.is_public ? (
                     <>
                       <CheckCircle2 className="w-3 h-3 text-green-600" /> Visible en web
@@ -320,24 +355,49 @@ export const Activities: React.FC = () => {
                     </>
                   )}
                 </span>
-                <div className="flex items-center gap-1">
-                  <Button
-                    variant="ghost"
-                    size="xs"
-                    icon={<Edit2 className="w-3 h-3" />}
-                    onClick={() => openEdit(act)}
-                  >
-                    Editar
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="xs"
-                    icon={<Trash2 className="w-3 h-3 text-red-500" />}
-                    onClick={() => openLifecycle(act)}
-                    title="Eliminar o archivar actividad con evaluación de dependencias"
-                  >
-                    {act.is_archived ? 'Gestionar' : 'Eliminar'}
-                  </Button>
+                <div className="flex items-center gap-1.5">
+                  {act.is_archived ? (
+                    <>
+                      <Button
+                        variant="secondary"
+                        size="xs"
+                        icon={<RotateCcw className="w-3 h-3 text-emerald-600" />}
+                        onClick={() => handleQuickUnarchive(act)}
+                        title="Reactivar actividad para volver a publicarla"
+                      >
+                        Reactivar
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        icon={<Trash2 className="w-3 h-3 text-red-500" />}
+                        onClick={() => openLifecycle(act)}
+                        title="Opciones de eliminación"
+                      >
+                        Eliminar
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        icon={<Edit2 className="w-3 h-3" />}
+                        onClick={() => openEdit(act)}
+                      >
+                        Editar
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        icon={<Trash2 className="w-3 h-3 text-red-500" />}
+                        onClick={() => openLifecycle(act)}
+                        title="Eliminar o archivar actividad con evaluación de dependencias"
+                      >
+                        Eliminar
+                      </Button>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
@@ -509,7 +569,9 @@ export const Activities: React.FC = () => {
         onClose={() => setLifecycleModalOpen(false)}
         title={
           targetActivity
-            ? `Ciclo de vida: ${targetActivity.name}`
+            ? targetActivity.is_archived
+              ? `Actividad Archivada: ${targetActivity.name}`
+              : `Eliminar o Archivar: ${targetActivity.name}`
             : 'Gestión de actividad'
         }
       >
@@ -533,40 +595,45 @@ export const Activities: React.FC = () => {
             </div>
           ) : dependencies ? (
             <div className="space-y-4">
-              {/* Diagnóstico de elementos relacionados */}
-              <div className="bg-brand-50 border border-brand-200 rounded-xl p-4 text-xs space-y-2.5">
-                <div className="font-bold text-brand-900 flex items-center gap-1.5">
-                  <Info className="w-4 h-4 text-brand-700" />
-                  <span>Elementos relacionados detectados en el sistema:</span>
+              {/* Diagnóstico rápido y visual en 4 números */}
+              <div className="bg-brand-50 border border-brand-200 rounded-xl p-3.5 text-xs space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-brand-900 flex items-center gap-1.5">
+                    <Info className="w-4 h-4 text-brand-700" />
+                    <span>Estado en el sistema:</span>
+                  </span>
+                  <Badge variant={targetActivity?.is_archived ? 'default' : 'success'}>
+                    {targetActivity?.is_archived ? 'Archivada' : 'Activa'}
+                  </Badge>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2 text-[11px]">
+                <div className="grid grid-cols-2 gap-2 text-[11px] pt-1">
                   <div className="p-2 bg-white rounded-lg border border-brand-200">
-                    <span className="text-brand-400 block">Horarios habituales (plantillas):</span>
+                    <span className="text-brand-400 block">Horarios habituales:</span>
                     <strong className="text-brand-900 text-xs">
                       {dependencies.schedules_count} {dependencies.schedules_count === 1 ? 'horario' : 'horarios'}
                     </strong>
                   </div>
 
                   <div className="p-2 bg-white rounded-lg border border-brand-200">
-                    <span className="text-brand-400 block">Sesiones pasadas (historial):</span>
+                    <span className="text-brand-400 block">Clases históricas pasadas:</span>
                     <strong className="text-brand-900 text-xs">
                       {dependencies.past_sessions_count} {dependencies.past_sessions_count === 1 ? 'clase' : 'clases'}
                     </strong>
                   </div>
 
                   <div className="p-2 bg-white rounded-lg border border-brand-200">
-                    <span className="text-brand-400 block">Sesiones futuras totales:</span>
+                    <span className="text-brand-400 block">Turnos futuros:</span>
                     <strong className="text-brand-900 text-xs">
                       {dependencies.future_sessions_count} turnos
                     </strong>
-                    <span className="text-[10px] text-brand-500 block mt-0.5">
+                    <span className="text-[10px] text-brand-500 block">
                       ({dependencies.future_sessions_with_bookings} con inscriptos · {dependencies.future_sessions_without_bookings} vacíos)
                     </span>
                   </div>
 
                   <div className="p-2 bg-white rounded-lg border border-brand-200">
-                    <span className="text-brand-400 block">Alumnos recurrentes activos:</span>
+                    <span className="text-brand-400 block">Alumnos recurrentes:</span>
                     <strong className="text-brand-900 text-xs">
                       {dependencies.active_recurring_count} {dependencies.active_recurring_count === 1 ? 'alumno' : 'alumnos'}
                     </strong>
@@ -574,108 +641,173 @@ export const Activities: React.FC = () => {
                 </div>
               </div>
 
-              {/* Opciones según el diagnóstico */}
-              {dependencies.has_bookings_or_history ? (
-                /* CASO C: TIENE RESERVAS O HISTORIAL */
+              {/* OPCIONES SI YA ESTÁ ARCHIVADA */}
+              {targetActivity?.is_archived ? (
                 <div className="space-y-3">
-                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 flex items-start gap-2">
-                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div className="p-3.5 bg-white border border-brand-300 rounded-xl flex items-center justify-between gap-3 shadow-2xs">
                     <div>
-                      <strong>Protección de datos activa:</strong> Esta actividad cuenta con reservas de alumnos o historial de clases dictadas.
-                      Eliminarla físicamente destruiría silenciosamente las inscripciones y el registro contable. Seleccioná una de las siguientes opciones seguras:
+                      <div className="font-bold text-brand-900 text-xs flex items-center gap-1.5">
+                        <RotateCcw className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>Reactivar actividad</span>
+                      </div>
+                      <p className="text-[11px] text-brand-500 mt-0.5 leading-relaxed">
+                        Vuelve a colocar la actividad en tu lista de actividades activas y en la página pública de reservas.
+                      </p>
                     </div>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={handleModalUnarchive}
+                      loading={actionLoading}
+                      icon={<RotateCcw className="w-3 h-3" />}
+                    >
+                      Reactivar
+                    </Button>
                   </div>
 
-                  <div className="space-y-2">
-                    {/* Opción 1: Archivar (Recomendada) */}
-                    <div className="p-3 bg-white border border-brand-300 rounded-xl hover:border-brand-900 transition-colors flex items-center justify-between gap-3">
+                  {/* Si tiene turnos futuros vacíos para limpiar */}
+                  {dependencies.future_sessions_without_bookings > 0 && (
+                    <div className="p-3.5 bg-white border border-brand-200 rounded-xl flex items-center justify-between gap-3">
                       <div>
                         <div className="font-bold text-brand-900 text-xs flex items-center gap-1.5">
-                          <Archive className="w-3.5 h-3.5 text-brand-700" />
-                          <span>Archivar actividad (Recomendado)</span>
+                          <Trash2 className="w-3.5 h-3.5 text-amber-600" />
+                          <span>Limpiar turnos futuros vacíos</span>
                         </div>
                         <p className="text-[11px] text-brand-500 mt-0.5 leading-relaxed">
-                          La retira de las reservas públicas y pausa sus plantillas semanales, pero <strong>conserva intactas todas las reservas</strong> y el historial.
+                          Elimina los {dependencies.future_sessions_without_bookings} turnos futuros sin alumnos de esta actividad que quedaron en el calendario.
                         </p>
                       </div>
                       <Button
-                        variant="primary"
+                        variant="secondary"
                         size="sm"
-                        onClick={handleArchive}
+                        onClick={() => handleDelete('clean_unbooked_future_and_archive')}
                         loading={actionLoading}
                       >
-                        Archivar
+                        Limpiar {dependencies.future_sessions_without_bookings} turnos
                       </Button>
                     </div>
+                  )}
 
-                    {/* Opción 2: Limpiar turnos vacíos y archivar */}
-                    {dependencies.future_sessions_without_bookings > 0 && (
-                      <div className="p-3 bg-white border border-brand-300 rounded-xl hover:border-brand-900 transition-colors flex items-center justify-between gap-3">
+                  {/* Si no tiene reservas ni historial y se puede eliminar del todo */}
+                  {!dependencies.has_bookings_or_history && (
+                    <div className="p-3 bg-red-50 border border-red-200 rounded-xl flex items-center justify-between gap-3">
+                      <div>
+                        <div className="font-bold text-red-900 text-xs">Eliminar definitivamente</div>
+                        <p className="text-[11px] text-red-700 mt-0.5">
+                          No tiene alumnos inscriptos ni historial. Podés borrarla del todo de la base de datos.
+                        </p>
+                      </div>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        className="text-red-600 hover:text-red-700 hover:bg-red-100"
+                        onClick={() => handleDelete('delete_pure')}
+                        loading={actionLoading}
+                        icon={<Trash2 className="w-3 h-3" />}
+                      >
+                        Eliminar del todo
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* OPCIONES SI ESTÁ ACTIVA (NO ARCHIVADA) */
+                dependencies.has_bookings_or_history ? (
+                  <div className="space-y-3">
+                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                      <div>
+                        <strong>Protección de alumnos activa:</strong> Esta actividad cuenta con {dependencies.confirmed_bookings_count} reservas o historial. Para no destruir los turnos de tus alumnos, el sistema la archiva preservando todas las inscripciones.
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="p-3.5 bg-white border border-brand-300 rounded-xl flex items-center justify-between gap-3 shadow-2xs">
                         <div>
                           <div className="font-bold text-brand-900 text-xs flex items-center gap-1.5">
-                            <Trash2 className="w-3.5 h-3.5 text-amber-600" />
-                            <span>Limpiar turnos vacíos y archivar</span>
+                            <Archive className="w-3.5 h-3.5 text-brand-700" />
+                            <span>Archivar actividad (Recomendado)</span>
                           </div>
                           <p className="text-[11px] text-brand-500 mt-0.5 leading-relaxed">
-                            Elimina los {dependencies.future_sessions_without_bookings} turnos futuros sin alumnos y archiva la actividad, preservando las {dependencies.future_sessions_with_bookings} sesiones con inscriptos.
+                            La retira de las reservas públicas, pero <strong>conserva intactas todas las reservas</strong> e historial de los alumnos.
                           </p>
                         </div>
                         <Button
-                          variant="secondary"
+                          variant="primary"
                           size="sm"
-                          onClick={() => handleDelete('clean_unbooked_future_and_archive')}
+                          onClick={handleArchive}
                           loading={actionLoading}
                         >
-                          Limpiar y archivar
+                          Archivar
                         </Button>
                       </div>
-                    )}
-                  </div>
-                </div>
-              ) : dependencies.future_sessions_count > 0 ? (
-                /* CASO B: TIENE TURNOS PERO SIN RESERVAS */
-                <div className="space-y-3">
-                  <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-800">
-                    Esta actividad no tiene alumnos inscriptos ni historial, pero tiene <strong>{dependencies.future_sessions_count} turnos futuros vacíos</strong> y {dependencies.schedules_count} horarios configurados.
-                  </div>
 
-                  <div className="flex flex-col gap-2">
-                    <Button
-                      variant="primary"
-                      onClick={() => handleDelete('delete_pure')}
-                      loading={actionLoading}
-                      icon={<Trash2 className="w-3.5 h-3.5" />}
-                    >
-                      Eliminar actividad y sus {dependencies.future_sessions_count} turnos vacíos
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      onClick={handleArchive}
-                      loading={actionLoading}
-                      icon={<Archive className="w-3.5 h-3.5" />}
-                    >
-                      Solo archivarla
-                    </Button>
+                      {dependencies.future_sessions_without_bookings > 0 && (
+                        <div className="p-3.5 bg-white border border-brand-300 rounded-xl flex items-center justify-between gap-3">
+                          <div>
+                            <div className="font-bold text-brand-900 text-xs flex items-center gap-1.5">
+                              <Trash2 className="w-3.5 h-3.5 text-amber-600" />
+                              <span>Limpiar turnos vacíos y archivar</span>
+                            </div>
+                            <p className="text-[11px] text-brand-500 mt-0.5 leading-relaxed">
+                              Borra los {dependencies.future_sessions_without_bookings} turnos futuros sin alumnos y archiva la actividad, conservando las {dependencies.future_sessions_with_bookings} sesiones con alumnos.
+                            </p>
+                          </div>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => handleDelete('clean_unbooked_future_and_archive')}
+                            loading={actionLoading}
+                          >
+                            Limpiar y archivar
+                          </Button>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ) : (
-                /* CASO A: TOTALMENTE LIMPIA SIN DEPENDENCIAS */
-                <div className="space-y-3">
-                  <div className="p-3 bg-green-50 border border-green-200 rounded-xl text-xs text-green-800">
-                    Esta actividad no tiene horarios, sesiones ni alumnos inscriptos asociados. Podés eliminarla definitivamente de forma segura.
-                  </div>
+                ) : dependencies.future_sessions_count > 0 ? (
+                  <div className="space-y-3">
+                    <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-800">
+                      Esta actividad no tiene alumnos inscriptos ni historial, pero tiene <strong>{dependencies.future_sessions_count} turnos futuros vacíos</strong> en el calendario.
+                    </div>
 
-                  <div className="flex justify-end gap-2 pt-2">
-                    <Button
-                      variant="primary"
-                      onClick={() => handleDelete('delete_pure')}
-                      loading={actionLoading}
-                      icon={<Trash2 className="w-3.5 h-3.5" />}
-                    >
-                      Confirmar eliminación definitiva
-                    </Button>
+                    <div className="flex flex-col gap-2">
+                      <Button
+                        variant="primary"
+                        onClick={() => handleDelete('delete_pure')}
+                        loading={actionLoading}
+                        icon={<Trash2 className="w-3.5 h-3.5" />}
+                      >
+                        Eliminar actividad y sus {dependencies.future_sessions_count} turnos vacíos
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        onClick={handleArchive}
+                        loading={actionLoading}
+                        icon={<Archive className="w-3.5 h-3.5" />}
+                      >
+                        Solo archivarla
+                      </Button>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="p-3 bg-green-50 border border-green-200 rounded-xl text-xs text-green-800">
+                      Esta actividad no tiene horarios, sesiones ni alumnos inscriptos. Podés eliminarla definitivamente de forma segura.
+                    </div>
+
+                    <div className="flex justify-end gap-2 pt-2">
+                      <Button
+                        variant="primary"
+                        onClick={() => handleDelete('delete_pure')}
+                        loading={actionLoading}
+                        icon={<Trash2 className="w-3.5 h-3.5" />}
+                      >
+                        Confirmar eliminación definitiva
+                      </Button>
+                    </div>
+                  </div>
+                )
               )}
             </div>
           ) : null}

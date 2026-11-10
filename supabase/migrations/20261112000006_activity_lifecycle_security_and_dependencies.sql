@@ -181,6 +181,41 @@ END;
 $$;
 
 -- -----------------------------------------------------------------------------
+-- 3.1 PROCEDIMIENTO: REACTIVAR / DESARCHIVAR ACTIVIDAD
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.unarchive_activity(
+    p_organization_id UUID,
+    p_activity_id UUID
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = 'public'
+AS $$
+BEGIN
+    IF NOT (
+        public.has_org_role(p_organization_id, ARRAY['owner', 'admin']::public.organization_role[])
+        OR public.is_platform_admin()
+    ) THEN
+        RAISE EXCEPTION 'No tenés permisos para reactivar actividades en esta organización.';
+    END IF;
+
+    UPDATE public.activities
+    SET is_archived = FALSE,
+        is_active = TRUE,
+        is_public = TRUE,
+        updated_at = NOW()
+    WHERE id = p_activity_id AND organization_id = p_organization_id;
+
+    RETURN jsonb_build_object(
+        'success', TRUE,
+        'activity_id', p_activity_id,
+        'message', 'Actividad reactivada exitosamente.'
+    );
+END;
+$$;
+
+-- -----------------------------------------------------------------------------
 -- 4. PROCEDIMIENTO: ELIMINACIÓN INTELIGENTE DE ACTIVIDAD
 -- -----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.delete_activity_intelligent(
@@ -452,5 +487,6 @@ WHERE o.is_active = TRUE
 -- Permisos sobre las nuevas funciones
 GRANT EXECUTE ON FUNCTION public.analyze_activity_dependencies TO authenticated;
 GRANT EXECUTE ON FUNCTION public.archive_activity TO authenticated;
+GRANT EXECUTE ON FUNCTION public.unarchive_activity TO authenticated;
 GRANT EXECUTE ON FUNCTION public.delete_activity_intelligent TO authenticated;
 GRANT EXECUTE ON FUNCTION public.revert_batch_operation TO authenticated;

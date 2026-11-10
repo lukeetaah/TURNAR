@@ -257,6 +257,40 @@ export const useActivities = (orgId: string | null, includeArchived = true) => {
     return { error: err?.message ?? null };
   };
 
+  // Reactivar / Desarchivar actividad
+  const unarchiveActivity = async (activityId: string) => {
+    if (!supabase || !orgId) return { error: 'No configurado' };
+
+    // Intentar RPC
+    try {
+      const { data: rpcData, error: rpcErr } = await supabase.rpc('unarchive_activity', {
+        p_organization_id: orgId,
+        p_activity_id: activityId,
+      });
+      if (!rpcErr && rpcData) {
+        await fetch();
+        return { error: null };
+      }
+    } catch {
+      // Fallback
+    }
+
+    // Fallback en cliente
+    const { error: err } = await supabase
+      .from('activities')
+      .update({
+        is_archived: false,
+        is_active: true,
+        is_public: true,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', activityId)
+      .eq('organization_id', orgId);
+
+    if (!err) await fetch();
+    return { error: err?.message ?? null };
+  };
+
   // Eliminación inteligente evaluando dependencias (Section 2.1 y 2.2)
   const deleteActivityIntelligent = async (
     activityId: string,
@@ -360,6 +394,7 @@ export const useActivities = (orgId: string | null, includeArchived = true) => {
     updateActivityWithScope,
     analyzeActivityDependencies,
     archiveActivity,
+    unarchiveActivity,
     deleteActivityIntelligent,
   };
 };
