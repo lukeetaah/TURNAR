@@ -7,9 +7,15 @@ import {
   CreditCard,
   TrendingUp,
   Clock,
+  Globe,
+  Copy,
+  Check,
+  ExternalLink,
+  Plus,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import { useOrg } from '@/contexts/OrgContext';
+import { Button } from '@/components/ui/Button';
 
 interface DashboardStats {
   totalContacts: number;
@@ -53,6 +59,7 @@ export const Dashboard: React.FC = () => {
     activities: { name: string } | null;
   }>>([]);
   const [loading, setLoading] = useState(true);
+  const [copiedLink, setCopiedLink] = useState(false);
 
   useEffect(() => {
     if (!supabase || !orgId) { setLoading(false); return; }
@@ -141,6 +148,65 @@ export const Dashboard: React.FC = () => {
         <h1 className="text-lg font-bold text-brand-900">{orgName}</h1>
         <p className="text-xs text-brand-400">Resumen del día</p>
       </div>
+
+      {/* ── Guía rápida de flujo ── */}
+      {stats?.totalActivities === 0 ? (
+        <div className="bg-gradient-to-r from-brand-900 to-brand-800 text-white rounded-2xl p-5 mb-6 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-terracotta-400">
+              Paso 1 para empezar
+            </span>
+            <h2 className="text-sm font-bold text-white mt-0.5">Creá tu primera actividad</h2>
+            <p className="text-xs text-brand-200 mt-1 max-w-lg leading-relaxed">
+              Definí los talleres o clases que ofrecés en tu espacio (ej. Yoga, Cerámica, Pilates) para empezar a armar tus horarios.
+            </p>
+          </div>
+          <Button
+            variant="primary"
+            onClick={() => navigate(`/app/${orgSlug}/activities`)}
+            icon={<Plus className="w-3.5 h-3.5" />}
+          >
+            Crear actividad
+          </Button>
+        </div>
+      ) : (
+        <div className="bg-white border border-brand-200 rounded-xl p-3.5 mb-6 shadow-2xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-brand-50 flex items-center justify-center text-brand-700 shrink-0">
+              <Globe className="w-4 h-4" />
+            </div>
+            <div>
+              <span className="text-xs font-bold text-brand-900 block">Enlace público de reservas</span>
+              <span className="text-[11px] text-brand-400 font-mono">
+                {`${window.location.origin}/o/${orgSlug}`}
+              </span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <Button
+              variant="secondary"
+              size="xs"
+              icon={copiedLink ? <Check className="w-3 h-3 text-green-600" /> : <Copy className="w-3 h-3" />}
+              onClick={() => {
+                navigator.clipboard.writeText(`${window.location.origin}/o/${orgSlug}`);
+                setCopiedLink(true);
+                setTimeout(() => setCopiedLink(false), 2000);
+              }}
+            >
+              {copiedLink ? 'Copiado' : 'Copiar enlace'}
+            </Button>
+            <a
+              href={`/o/${orgSlug}`}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-lg border border-brand-200 text-brand-700 hover:bg-brand-50 transition-colors"
+            >
+              <span>Ver página</span>
+              <ExternalLink className="w-3 h-3" />
+            </a>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
         <StatCard

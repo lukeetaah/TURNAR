@@ -19,6 +19,7 @@ import {
   Compass,
   User as UserIcon,
   ShieldAlert,
+  ClipboardCheck,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useOrg } from '@/contexts/OrgContext';
@@ -39,7 +40,7 @@ const allNavItems: NavItem[] = [
   { to: 'dashboard', label: 'Inicio', icon: LayoutDashboard },
   { to: 'activities', label: 'Actividades', icon: Dumbbell, allowedRoles: ['owner', 'admin', 'instructor'] },
   { to: 'sessions', label: 'Sesiones y Horarios', icon: Calendar, allowedRoles: ['owner', 'admin', 'instructor'] },
-  { to: 'agenda', label: 'Agenda', icon: Calendar },
+  { to: 'agenda', label: 'Asistencia del día', icon: ClipboardCheck },
   { to: 'contacts', label: 'Alumnos', icon: Users, allowedRoles: ['owner', 'admin', 'instructor'] },
   { to: 'payments', label: 'Pagos', icon: CreditCard, allowedRoles: ['owner', 'admin'] },
   { to: 'communications', label: 'Comunicaciones', icon: MessageSquare },

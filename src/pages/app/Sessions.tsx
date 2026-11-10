@@ -215,6 +215,9 @@ export const Sessions: React.FC = () => {
   const [historyModalOpen, setHistoryModalOpen] = useState(false);
   const [undoingBatchId, setUndoingBatchId] = useState<string | null>(null);
 
+  // Asistente guiado para cargar turnos
+  const [actionWizardOpen, setActionWizardOpen] = useState(false);
+
   // Modal Generar desde Agenda Habitual
   const [genScheduleModalOpen, setGenScheduleModalOpen] = useState(false);
   const [genScheduleWeeks, setGenScheduleWeeks] = useState<number>(4);
@@ -867,56 +870,24 @@ export const Sessions: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {/* Botón Historial de operaciones masivas / Deshacer */}
-          <Button
-            variant="ghost"
-            size="sm"
-            icon={<History className="w-3.5 h-3.5" />}
-            onClick={() => setHistoryModalOpen(true)}
-            title="Ver historial de operaciones y deshacer de forma segura"
-          >
-            Historial / Deshacer
-          </Button>
-
           {viewTab === 'calendar' ? (
             <>
               <Button
                 variant="ghost"
                 size="sm"
-                icon={<Copy className="w-3.5 h-3.5" />}
-                onClick={copyPreviousWeek}
-                loading={saving === 'batch'}
-                title="Copia todas las clases de la semana anterior a esta semana"
+                icon={<History className="w-3.5 h-3.5" />}
+                onClick={() => setHistoryModalOpen(true)}
+                title="Ver historial de operaciones y deshacer de forma segura"
               >
-                Copiar semana anterior
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                icon={<Calendar className="w-3.5 h-3.5" />}
-                onClick={() => setMonthModalOpen(true)}
-                title="Replicar el mes anterior automáticamente"
-              >
-                📅 Repetir mes anterior
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                icon={<Zap className="w-3.5 h-3.5 text-brand-700" />}
-                onClick={() => setGenScheduleModalOpen(true)}
-                disabled={schedules.length === 0}
-                title="Proyectar turnos en el calendario usando la Agenda Habitual"
-              >
-                Proyectar Agenda Habitual
+                Historial / Deshacer
               </Button>
               <Button
                 variant="primary"
                 size="sm"
-                icon={<Plus className="w-3.5 h-3.5" />}
-                onClick={() => { setGenForm((f) => ({ ...f, activity_id: activities[0]?.id ?? '' })); setGenOpen(true); }}
-                disabled={activities.length === 0}
+                icon={<Zap className="w-3.5 h-3.5" />}
+                onClick={() => setActionWizardOpen(true)}
               >
-                Generar semana rápida
+                Cargar o proyectar turnos
               </Button>
             </>
           ) : (
@@ -1823,6 +1794,119 @@ export const Sessions: React.FC = () => {
               icon={<Zap className="w-3.5 h-3.5" />}
             >
               Generar {genPreview.reduce((acc, d) => acc + d.slots.length, 0)} sesiones
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* ── Asistente Guiado: Cargar o Proyectar Turnos ── */}
+      <Modal
+        open={actionWizardOpen}
+        onClose={() => setActionWizardOpen(false)}
+        title="¿Cómo querés cargar tus turnos?"
+      >
+        <div className="space-y-3">
+          <p className="text-xs text-brand-500 leading-relaxed">
+            Elegí la opción más cómoda para armar las clases en tu calendario:
+          </p>
+
+          {/* Opción 1: Proyectar desde Agenda Habitual */}
+          <div className="p-3.5 rounded-xl border border-brand-200 hover:border-brand-900 bg-white transition-all space-y-2">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <span className="font-bold text-xs text-brand-900 flex items-center gap-1.5">
+                  <Layers className="w-4 h-4 text-brand-700" />
+                  <span>Proyectar desde tu Agenda Habitual (Recomendado)</span>
+                </span>
+                <p className="text-[11px] text-brand-500 mt-0.5 leading-relaxed">
+                  Generá automáticamente 1 semana, 2 semanas o 1 mes completo usando tus plantillas fijas de días y horarios.
+                </p>
+              </div>
+              <Button
+                variant="primary"
+                size="xs"
+                onClick={() => {
+                  setActionWizardOpen(false);
+                  setGenScheduleModalOpen(true);
+                }}
+                disabled={schedules.length === 0}
+              >
+                Proyectar
+              </Button>
+            </div>
+            {schedules.length === 0 && (
+              <div className="text-[10px] text-amber-700 bg-amber-50 p-1.5 rounded-lg">
+                Primero configurá al menos un horario en la pestaña <strong>Agenda Habitual</strong>.
+              </div>
+            )}
+          </div>
+
+          {/* Opción 2: Replicar períodos anteriores */}
+          <div className="p-3.5 rounded-xl border border-brand-200 bg-brand-50/50 space-y-2.5">
+            <div>
+              <span className="font-bold text-xs text-brand-900 flex items-center gap-1.5">
+                <Copy className="w-4 h-4 text-brand-700" />
+                <span>Replicar períodos anteriores</span>
+              </span>
+              <p className="text-[11px] text-brand-500 mt-0.5 leading-relaxed">
+                Copiá exactamente las clases que ya tenías programadas en fechas previas.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="secondary"
+                size="xs"
+                icon={<Copy className="w-3 h-3" />}
+                onClick={() => {
+                  setActionWizardOpen(false);
+                  copyPreviousWeek();
+                }}
+                loading={saving === 'batch'}
+              >
+                Copiar semana anterior
+              </Button>
+              <Button
+                variant="secondary"
+                size="xs"
+                icon={<Calendar className="w-3 h-3" />}
+                onClick={() => {
+                  setActionWizardOpen(false);
+                  setMonthModalOpen(true);
+                }}
+              >
+                Repetir mes pasado
+              </Button>
+            </div>
+          </div>
+
+          {/* Opción 3: Carga manual rápida de franja */}
+          <div className="p-3.5 rounded-xl border border-brand-200 bg-white flex items-center justify-between gap-3">
+            <div>
+              <span className="font-bold text-xs text-brand-900 flex items-center gap-1.5">
+                <Clock className="w-4 h-4 text-brand-700" />
+                <span>Cargar franja horaria especial</span>
+              </span>
+              <p className="text-[11px] text-brand-500 mt-0.5 leading-relaxed">
+                Armá clases en serie para esta semana con descansos intermedios adaptables.
+              </p>
+            </div>
+            <Button
+              variant="secondary"
+              size="xs"
+              onClick={() => {
+                setActionWizardOpen(false);
+                setGenForm((f) => ({ ...f, activity_id: activities[0]?.id ?? '' }));
+                setGenOpen(true);
+              }}
+              disabled={activities.length === 0}
+            >
+              Configurar
+            </Button>
+          </div>
+
+          <div className="flex justify-end pt-2 border-t border-brand-100">
+            <Button variant="secondary" onClick={() => setActionWizardOpen(false)}>
+              Cerrar
             </Button>
           </div>
         </div>
