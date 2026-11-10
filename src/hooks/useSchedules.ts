@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase/client';
 
 export interface ActivitySchedule {
   id: string;
+  organization_id: string;
   activity_id: string;
   instructor_id: string | null;
   day_of_week: number; // 0: Dom, 1: Lun, ..., 6: Sáb
@@ -32,13 +33,14 @@ export const useSchedules = (orgId: string | null) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Cargar programación habitual
+  // Cargar programación habitual aislada por organización
   const fetchSchedules = useCallback(async () => {
     if (!supabase || !orgId) { setLoading(false); return; }
     setLoading(true);
     const { data, error: err } = await supabase
       .from('activity_schedules')
       .select('*')
+      .eq('organization_id', orgId)
       .order('day_of_week')
       .order('start_time');
 
@@ -68,7 +70,7 @@ export const useSchedules = (orgId: string | null) => {
     fetchBatches();
   }, [fetchSchedules, fetchBatches]);
 
-  // Crear horario habitual
+  // Crear horario habitual con organization_id explícito
   const createSchedule = async (payload: {
     activity_id: string;
     day_of_week: number;
@@ -79,6 +81,7 @@ export const useSchedules = (orgId: string | null) => {
     if (!supabase || !orgId) return { error: 'No configurado' };
     const { error: err } = await supabase.from('activity_schedules').insert({
       ...payload,
+      organization_id: orgId,
       is_active: true,
     });
     if (!err) await fetchSchedules();
@@ -87,27 +90,29 @@ export const useSchedules = (orgId: string | null) => {
 
   // Modificar horario habitual
   const updateSchedule = async (id: string, payload: Partial<ActivitySchedule>) => {
-    if (!supabase) return { error: 'No configurado' };
+    if (!supabase || !orgId) return { error: 'No configurado' };
     const { error: err } = await supabase
       .from('activity_schedules')
       .update(payload)
-      .eq('id', id);
+      .eq('id', id)
+      .eq('organization_id', orgId);
     if (!err) await fetchSchedules();
     return { error: err?.message ?? null };
   };
 
   // Eliminar horario habitual
   const deleteSchedule = async (id: string) => {
-    if (!supabase) return { error: 'No configurado' };
+    if (!supabase || !orgId) return { error: 'No configurado' };
     const { error: err } = await supabase
       .from('activity_schedules')
       .delete()
-      .eq('id', id);
+      .eq('id', id)
+      .eq('organization_id', orgId);
     if (!err) await fetchSchedules();
     return { error: err?.message ?? null };
   };
 
-  // Generar turnos masivos fechados a partir de los horarios habituales
+  // Generar turnos masivos fechados evitando duplicados y con trazabilidad de batch
   const generateSessionsFromSchedules = async (
     startDate: Date,
     weeksCount: number,
@@ -137,9 +142,8 @@ export const useSchedules = (orgId: string | null) => {
         if (!sch.is_active) continue;
 
         // Calcular la fecha exacta del día de la semana (sch.day_of_week: 0=dom, 1=lun, ..., 6=sab)
-        // currentWeekMonday es lunes
+        // currentWeekMonday es lunes (1)
         const targetDate = new Date(currentWeekMonday);
-        // Si day_of_week es 1 (lunes), diff = 0; si es 2 (martes), diff = 1; etc.
         const dayOffset = sch.day_of_week === 0 ? 6 : sch.day_of_week - 1;
         targetDate.setDate(targetDate.getDate() + dayOffset);
 
@@ -172,10 +176,40 @@ export const useSchedules = (orgId: string | null) => {
       return { error: 'No se generaron sesiones.', count: 0 };
     }
 
-    // Inserción en la base de datos
+    // 1. Detección de duplicados existentes en el horizonte
+    const horizonEnd = new Date(startDate);
+    horizonEnd.setDate(horizonEnd.getDate() + weeksCount * 7 + 2);
+
+    const { data: existingSessions } = await supabase
+      .from('activity_sessions')
+      .select('activity_id, start_time')
+      .eq('organization_id', orgId)
+      .gte('start_time', startDate.toISOString())
+      .lte('start_time', horizonEnd.toISOString())
+      .neq('status', 'cancelled');
+
+    const existingSet = new Set(
+      (existingSessions || []).map(
+        (s: { activity_id: string; start_time: string }) =>
+          `${s.activity_id}_${new Date(s.start_time).getTime()}`
+      )
+    );
+
+    const deduplicatedToInsert = toInsert.filter(
+      (s) => !existingSet.has(`${s.activity_id}_${new Date(s.start_time).getTime()}`)
+    );
+
+    if (deduplicatedToInsert.length === 0) {
+      return {
+        error: 'Todos los turnos de este período ya estaban generados previamente en el calendario.',
+        count: 0,
+      };
+    }
+
+    // 2. Inserción de turnos limpios
     const { data: inserted, error: insErr } = await supabase
       .from('activity_sessions')
-      .insert(toInsert)
+      .insert(deduplicatedToInsert)
       .select('id');
 
     if (insErr) {
@@ -184,14 +218,14 @@ export const useSchedules = (orgId: string | null) => {
 
     const insertedIds = inserted ? inserted.map((row: { id: string }) => row.id) : [];
 
-    // Registrar la operación masiva (Batch) para permitir Deshacer (Undo)
+    // 3. Registrar la operación masiva (Batch) para permitir Deshacer (Undo)
     try {
       await supabase.from('schedule_batch_operations').insert({
         id: batchId,
         organization_id: orgId,
         operation_type: 'generate_from_schedule',
-        description: `Generación de ${toInsert.length} turnos para ${weeksCount} ${weeksCount === 1 ? 'semana' : 'semanas'}`,
-        affected_count: toInsert.length,
+        description: `Generación de ${deduplicatedToInsert.length} turnos para ${weeksCount} ${weeksCount === 1 ? 'semana' : 'semanas'}`,
+        affected_count: deduplicatedToInsert.length,
         session_ids: insertedIds,
         is_reverted: false,
       });
@@ -200,14 +234,14 @@ export const useSchedules = (orgId: string | null) => {
       // ignore si la tabla remota de batches aún no fue migrada
     }
 
-    return { error: null, count: toInsert.length, batchId };
+    return { error: null, count: deduplicatedToInsert.length, batchId };
   };
 
-  // Deshacer una operación masiva (Undo seguro)
+  // Deshacer una operación masiva (Undo seguro y protegido contra sesiones con inscriptos)
   const undoBatchOperation = async (batchId: string) => {
     if (!supabase || !orgId) return { error: 'No configurado', deletedCount: 0, blockedCount: 0 };
 
-    // 1. Intentar mediante RPC atómica centralizada
+    // 1. Intentar mediante RPC atómica centralizada con validación de rol
     try {
       const { data: rpcRes, error: rpcErr } = await supabase.rpc('revert_batch_operation', {
         p_organization_id: orgId,
@@ -222,11 +256,17 @@ export const useSchedules = (orgId: string | null) => {
           blockedCount: (rpcRes as { blocked_count: number }).blocked_count ?? 0,
         };
       }
+      if (rpcErr) {
+        // Si el error es de permisos o validación, informarlo
+        if (rpcErr.message.includes('Acceso denegado') || rpcErr.message.includes('ya fue revertida')) {
+          return { error: rpcErr.message, deletedCount: 0, blockedCount: 0 };
+        }
+      }
     } catch {
-      // Fallback si la función aún no se corrió en SQL Editor
+      // Fallback
     }
 
-    // Fallback: eliminación en cliente protegiendo sesiones con reservas
+    // 2. Fallback: eliminación en cliente protegiendo sesiones con reservas
     const { data: batchData } = await supabase
       .from('schedule_batch_operations')
       .select('*')
@@ -254,7 +294,8 @@ export const useSchedules = (orgId: string | null) => {
       const { error: delErr } = await supabase
         .from('activity_sessions')
         .delete()
-        .in('id', toDeleteIds);
+        .in('id', toDeleteIds)
+        .eq('organization_id', orgId);
       if (!delErr) deleted = toDeleteIds.length;
     }
 
@@ -266,7 +307,8 @@ export const useSchedules = (orgId: string | null) => {
           is_reverted: blockedIds.size === 0,
           reverted_at: new Date().toISOString(),
         })
-        .eq('id', batchId);
+        .eq('id', batchId)
+        .eq('organization_id', orgId);
       await fetchBatches();
     } catch {
       // ignore

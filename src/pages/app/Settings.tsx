@@ -314,10 +314,10 @@ export const Settings: React.FC = () => {
     id: string;
     organization_id: string | null;
     title: string;
-    body: string;
+    content: string;
     category: string;
     is_active: boolean;
-    is_mandatory: boolean;
+    requires_acceptance: boolean;
     version: number;
   }
 
@@ -336,9 +336,9 @@ export const Settings: React.FC = () => {
   const [editingRule, setEditingRule] = useState<OrgRule | null>(null);
   const [ruleForm, setRuleForm] = useState({
     title: '',
-    body: '',
+    content: '',
     category: 'general',
-    is_mandatory: false,
+    requires_acceptance: true,
   });
   const [savingRule, setSavingRule] = useState(false);
   const [ruleError, setRuleError] = useState<string | null>(null);
@@ -373,11 +373,12 @@ export const Settings: React.FC = () => {
       const { error: err } = await supabase
         .from('organization_rules')
         .update({
-          title: ruleForm.title,
-          body: ruleForm.body,
+          title: ruleForm.title.trim(),
+          content: ruleForm.content.trim(),
           category: ruleForm.category,
-          is_mandatory: ruleForm.is_mandatory,
+          requires_acceptance: ruleForm.requires_acceptance,
           version: (editingRule.version ?? 1) + 1,
+          updated_at: new Date().toISOString(),
         })
         .eq('id', editingRule.id);
       if (err) { setRuleError(err.message); setSavingRule(false); return; }
@@ -387,10 +388,10 @@ export const Settings: React.FC = () => {
         .from('organization_rules')
         .insert({
           organization_id: orgId,
-          title: ruleForm.title,
-          body: ruleForm.body,
+          title: ruleForm.title.trim(),
+          content: ruleForm.content.trim(),
           category: ruleForm.category,
-          is_mandatory: ruleForm.is_mandatory,
+          requires_acceptance: ruleForm.requires_acceptance,
           is_active: true,
           version: 1,
         });
@@ -795,7 +796,7 @@ export const Settings: React.FC = () => {
               icon={<Plus className="w-3.5 h-3.5" />}
               onClick={() => {
                 setEditingRule(null);
-                setRuleForm({ title: '', body: '', category: 'general', is_mandatory: false });
+                setRuleForm({ title: '', content: '', category: 'general', requires_acceptance: true });
                 setRuleModalOpen(true);
               }}
             >
@@ -845,13 +846,13 @@ export const Settings: React.FC = () => {
                                   TURNAR global
                                 </span>
                               )}
-                              {rule.is_mandatory && (
+                              {rule.requires_acceptance && (
                                 <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-amber-100 text-amber-700 font-bold">
                                   Obligatoria
                                 </span>
                               )}
                             </div>
-                            <p className="text-brand-500 leading-relaxed line-clamp-2">{rule.body}</p>
+                            <p className="text-brand-500 leading-relaxed line-clamp-2">{rule.content}</p>
                           </div>
                           {!isGlobal && isOwnerOrAdmin && (
                             <div className="flex items-center gap-1 shrink-0">
@@ -870,9 +871,9 @@ export const Settings: React.FC = () => {
                                   setEditingRule(rule);
                                   setRuleForm({
                                     title: rule.title,
-                                    body: rule.body,
+                                    content: rule.content,
                                     category: rule.category,
-                                    is_mandatory: rule.is_mandatory,
+                                    requires_acceptance: rule.requires_acceptance,
                                   });
                                   setRuleModalOpen(true);
                                 }}
@@ -927,8 +928,8 @@ export const Settings: React.FC = () => {
             <textarea
               rows={4}
               placeholder="Redactá la regla de forma clara y concisa para tus alumnos..."
-              value={ruleForm.body}
-              onChange={(e) => setRuleForm((f) => ({ ...f, body: e.target.value }))}
+              value={ruleForm.content}
+              onChange={(e) => setRuleForm((f) => ({ ...f, content: e.target.value }))}
               className="w-full text-sm rounded-lg border border-brand-300 px-3 py-2 resize-none"
               required
             />
@@ -950,8 +951,8 @@ export const Settings: React.FC = () => {
           <label className="flex items-center gap-2.5 cursor-pointer">
             <input
               type="checkbox"
-              checked={ruleForm.is_mandatory}
-              onChange={(e) => setRuleForm((f) => ({ ...f, is_mandatory: e.target.checked }))}
+              checked={ruleForm.requires_acceptance}
+              onChange={(e) => setRuleForm((f) => ({ ...f, requires_acceptance: e.target.checked }))}
               className="rounded border-brand-300 text-brand-900"
             />
             <div>
